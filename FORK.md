@@ -16,6 +16,11 @@ Everything upstream supports still works (`claude`, `codex`, `daily`,
 | **opencode / opencode2** | `~/.local/share/opencode/opencode.db` (SQLite) and legacy JSON storage — both the stable and the new `@opencode-ai/cli` write here | `ccusage opencode daily \| weekly \| monthly \| session` |
 | **pi** | `~/.pi/agent/sessions/` | `ccusage pi daily \| monthly \| session` |
 
+Conductor.build itself stores no token usage in its own database; it drives
+Claude Code / OpenCode inside its workspaces, so its sessions are already
+counted through the claude and opencode sources above (verified: sessions
+created by conductor appear in `ccusage opencode session`).
+
 All agents also roll into the unified reports (`ccusage daily`, `session`,
 `weekly`, `monthly`) with an Agent column.
 
