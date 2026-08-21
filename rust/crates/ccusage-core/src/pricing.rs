@@ -647,11 +647,26 @@ impl PricingMap {
     {
         let mut map = Self::load_embedded();
         if !offline {
-            let fetch_result = crate::progress::track_status(
-                log && crate::progress::usage_load_output_is_tty(),
-                "Refreshing model pricing from LiteLLM...",
-                fetch_pricing_json,
-            );
+            // Fresh local snapshot beats the network: no spinner, no lag.
+            // Stale snapshots still win over connection errors.
+            const PRICING_CACHE_TTL_SECS: u64 = 24 * 60 * 60;
+            let fetch_result = match read_cached_pricing_json(PRICING_CACHE_TTL_SECS) {
+                Some(cached) => Ok(cached),
+                None => {
+                    let result = crate::progress::track_status(
+                        log && crate::progress::usage_load_output_is_tty(),
+                        "Refreshing model pricing from LiteLLM...",
+                        fetch_pricing_json,
+                    );
+                    match result {
+                        Ok(json) => {
+                            write_cached_pricing_json(&json);
+                            Ok(json)
+                        }
+                        Err(error) => read_cached_pricing_json(u64::MAX).ok_or(error),
+                    }
+                }
+            };
 
             match fetch_result {
                 Ok(json) => {
@@ -2143,6 +2158,44 @@ where
 
 fn fetch_pricing_json() -> std::io::Result<String> {
     fetch_json_url(LITELLM_PRICING_URL)
+}
+
+/// Local copy of the last successful LiteLLM refresh, keyed by file mtime.
+/// A fresh cache means zero network round trips on startup.
+fn pricing_cache_path() -> Option<std::path::PathBuf> {
+    crate::home::home_dir().map(|home| {
+        home.join(".cache").join("ccusage").join("litellm-pricing.json")
+    })
+}
+
+fn read_cached_pricing_json(max_age_secs: u64) -> Option<String> {
+    let path = pricing_cache_path()?;
+    let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
+    let age = modified.elapsed().ok()?;
+    if age.as_secs() > max_age_secs {
+        return None;
+    }
+    let content = std::fs::read_to_string(&path).ok()?;
+    // Cheap sanity check so a truncated or corrupt cache cannot poison the
+    // pricing table.
+    (content.len() > 1_000 && content.trim_start().starts_with('{')).then_some(content)
+}
+
+fn write_cached_pricing_json(json: &str) {
+    let Some(path) = pricing_cache_path() else {
+        return;
+    };
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    // Temp file + rename keeps readers from ever seeing a partial write.
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, json).is_ok() {
+        let _ = std::fs::rename(tmp, path);
+    }
 }
 
 fn fetch_models_dev_json() -> std::io::Result<String> {
