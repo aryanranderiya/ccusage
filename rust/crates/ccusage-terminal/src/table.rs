@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use crate::{
     style::{Color, TerminalStyle, color},
     terminal::DEFAULT_TERMINAL_WIDTH,
-    width::{truncate_to_width, visible_width, visible_width_max_line},
+    width::{skip_ansi_escape, truncate_to_width, visible_width, visible_width_max_line},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -80,6 +80,7 @@ impl SimpleTable {
             match row {
                 Some(row) => {
                     let row = self.compact_date_row(row, &widths);
+                    let row = self.shrink_numeric_cells(row, &widths);
                     for physical_row in expand_multiline_row(&row, self.headers.len(), &widths) {
                         lines.push(table_line(&physical_row, &self.aligns, &widths));
                     }
@@ -145,6 +146,25 @@ impl SimpleTable {
             *first = compact;
         }
         row
+    }
+
+    /// Right-aligned numeric cells that no longer fit their column render as
+    /// magnitude abbreviations ("68,442,263" -> "68.44M") instead of being
+    /// truncated mid-digit, which would silently change the value.
+    fn shrink_numeric_cells(&self, row: Vec<String>, widths: &[usize]) -> Vec<String> {
+        row.into_iter()
+            .enumerate()
+            .map(|(index, cell)| {
+                let fits = visible_width_max_line(&cell) <= widths.get(index).copied().unwrap_or_default().saturating_sub(2);
+                if fits || self.aligns.get(index) != Some(&Align::Right) {
+                    return cell;
+                }
+                shrink_numeric_cell(
+                    &cell,
+                    widths.get(index).copied().unwrap_or_default().saturating_sub(2),
+                )
+            })
+            .collect()
     }
 }
 
@@ -474,4 +494,115 @@ mod tests {
             "Models width ({models_width}) should be close to widest line width ({widest_line}), not {sum_of_lines}"
         );
     }
+}
+/// Rewrites a numeric table cell into its widest magnitude abbreviation that
+/// fits `width` display columns. Cells that are not one contiguous number
+/// (optionally wrapped in ANSI color escapes) are returned unchanged so the
+/// regular wrap and truncate path handles them.
+///
+/// The abbreviation ladder keeps the most precise representation that fits:
+/// full digits, comma-stripped digits, then two/one/zero decimal magnitudes
+/// ("68,442,263" -> "68.44M" -> "68.4M" -> "68M").
+fn shrink_numeric_cell(cell: &str, width: usize) -> String {
+    let Some((prefix, numeric, suffix)) = split_numeric_cell(cell) else {
+        return cell.to_string();
+    };
+    let reserved = visible_width(prefix) + visible_width(suffix);
+    let budget = width.saturating_sub(reserved);
+    for candidate in abbreviate_number(numeric) {
+        if visible_width(&candidate) <= budget {
+            return format!("{prefix}{candidate}{suffix}");
+        }
+    }
+    cell.to_string()
+}
+
+/// Splits a plain or colored numeric cell into (leading escapes, numeric
+/// core, trailing escapes). Returns `None` when the cell's visible content is
+/// not exactly one number, leaving the truncate path to handle it.
+fn split_numeric_cell(cell: &str) -> Option<(&str, &str, &str)> {
+    let bytes = cell.as_bytes();
+    if !bytes.contains(&0x1b) {
+        let core = numeric_core(cell)?;
+        return Some(("", core, ""));
+    }
+    // Colored cells look like `<esc>...m<number><esc>...m`: escape runs around
+    // exactly one visible segment.
+    let mut index = 0;
+    while index < bytes.len() && bytes[index] == 0x1b {
+        index = skip_ansi_escape(bytes, index);
+    }
+    let text_start = index;
+    while index < bytes.len() && bytes[index] != 0x1b {
+        index += 1;
+    }
+    let text_end = index;
+    while index < bytes.len() && bytes[index] == 0x1b {
+        index = skip_ansi_escape(bytes, index);
+    }
+    if index != bytes.len() || text_start == text_end {
+        return None;
+    }
+    let core = numeric_core(&cell[text_start..text_end])?;
+    Some((&cell[..text_start], core, &cell[text_end..]))
+}
+
+/// The longest prefix of `value` that parses as a `$`-optional decimal number
+/// with comma groupings, or `None` when the value is not entirely numeric.
+fn numeric_core(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed != value {
+        return None;
+    }
+    let body = trimmed.strip_prefix('$').unwrap_or(trimmed);
+    let mut seen_digit = false;
+    for ch in body.chars() {
+        match ch {
+            '0'..='9' | ',' => {}
+            '.' if seen_digit => {}
+            _ => return None,
+        }
+        if ch.is_ascii_digit() {
+            seen_digit = true;
+        }
+    }
+    seen_digit.then_some(trimmed)
+}
+
+fn abbreviate_number(value: &str) -> Vec<String> {
+    let mut candidates = vec![value.to_string()];
+    let Some(number) = value
+        .trim_start_matches('$')
+        .replace(',', "")
+        .parse::<f64>()
+        .ok()
+        .filter(|number| number.is_finite())
+    else {
+        return candidates;
+    };
+    let currency = value.starts_with('$');
+    let magnitudes: [(&str, f64); 3] = [("B", 1_000_000_000.0), ("M", 1_000_000.0), ("k", 1_000.0)];
+    for (unit, divisor) in magnitudes {
+        if number < divisor {
+            continue;
+        }
+        let scaled = number / divisor;
+        for decimals in [2usize, 1, 0] {
+            let mut text = format!("{scaled:.decimals$}");
+            if text.contains('.') {
+                while text.ends_with('0') {
+                    text.pop();
+                }
+                if text.ends_with('.') {
+                    text.pop();
+                }
+            }
+            if currency {
+                candidates.push(format!("${text}{unit}"));
+            } else {
+                candidates.push(format!("{text}{unit}"));
+            }
+        }
+    }
+    candidates
 }

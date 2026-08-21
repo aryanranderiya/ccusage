@@ -1,13 +1,13 @@
 ---
 source: crates/ccusage-terminal/src/table.rs
-assertion_line: 495
+assertion_line: 453
 expression: "table.render_lines().join(\"\\n\")"
 ---
 ┌──────────┬────────────┬──────────┬──────────┬──────────┐
 │ Date     │ Models     │    Input │   Output │     Cost │
 │          │            │          │          │    (USD) │
 ├──────────┼────────────┼──────────┼──────────┼──────────┤
-│ 2026     │ -          │ 123,456… │ 9,876,5… │ $12345.… │
+│ 2026     │ -          │  123.46M │    9.88M │  $12.35k │
 │ 05-18    │ claude-so… │          │          │          │
 │          │ -          │          │          │          │
 │          │ unusually… │          │          │          │

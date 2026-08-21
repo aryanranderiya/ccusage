@@ -4,7 +4,7 @@ use unicode_width::UnicodeWidthChar;
 ///
 /// Only CSI sequences carry parameters, so a bare `\x1b` advances by one and a
 /// `\x1b[` run consumes bytes up to and including its alphabetic final byte.
-fn skip_ansi_escape(bytes: &[u8], index: usize) -> usize {
+pub(crate) fn skip_ansi_escape(bytes: &[u8], index: usize) -> usize {
     let mut index = index + 1;
     if index < bytes.len() && bytes[index] == b'[' {
         index += 1;
