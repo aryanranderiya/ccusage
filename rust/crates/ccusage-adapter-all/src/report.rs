@@ -698,7 +698,10 @@ pub(super) fn print_summary_view(
         let Some(breakdowns) = row.agent_breakdowns.as_ref() else {
             continue;
         };
-        for agent in breakdowns {
+        for (agent_index, agent) in breakdowns.iter().enumerate() {
+            if agent_index > 0 {
+                println!();
+            }
             // Agent subtotal line: name left, its cost right.
             let name = strip_store_prefix(agent.agent);
             let agent_cost = format_currency(agent.total_cost);
@@ -726,7 +729,7 @@ pub(super) fn print_summary_view(
                     cache_width,
                 ));
                 println!(
-                    "     {:<nw$} {:>iw$} {:>ow$} {:>cw$} {:>mw$}",
+                    "      {:<nw$} {:>iw$} {:>ow$} {:>cw$} {:>mw$}",
                     model_name,
                     format!("↑{}", short_tokens(model.input_tokens)),
                     format!("↓{}", short_tokens(model.output_tokens)),
