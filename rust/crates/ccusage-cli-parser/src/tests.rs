@@ -205,6 +205,8 @@ fn command_snapshot(command: Option<Command>) -> Value {
         Some(Command::Qwen(args)) => agent_command_snapshot("qwen", args),
         Some(Command::OpenClaw(args)) => agent_command_snapshot("openclaw", args),
         Some(Command::Grok(args)) => agent_command_snapshot("grok", args),
+        Some(Command::Fx(args)) => agent_command_snapshot("fx", args),
+        Some(Command::Prime(args)) => agent_command_snapshot("prime", args),
     }
 }
 
@@ -220,6 +222,8 @@ fn agent_command_snapshot(agent: &str, args: AgentCommandArgs) -> Value {
         "byAgent": args.by_agent,
         "piPath": args.pi_path,
         "openClawPath": args.open_claw_path,
+        "fxPath": args.fx_path,
+        "primePath": args.prime_path,
         "codexSpeed": format!("{:?}", args.codex_speed),
     })
 }

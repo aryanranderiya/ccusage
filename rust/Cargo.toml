@@ -24,6 +24,7 @@ ccusage-adapter-codex = { path = "adapters/codex" }
 ccusage-adapter-common = { path = "adapters/common" }
 ccusage-adapter-copilot = { path = "adapters/copilot" }
 ccusage-adapter-droid = { path = "adapters/droid" }
+ccusage-adapter-fx = { path = "adapters/fx" }
 ccusage-adapter-gemini = { path = "adapters/gemini" }
 ccusage-adapter-goose = { path = "adapters/goose" }
 ccusage-adapter-grok = { path = "adapters/grok" }
@@ -33,6 +34,7 @@ ccusage-adapter-kimi = { path = "adapters/kimi" }
 ccusage-adapter-openclaw = { path = "adapters/openclaw" }
 ccusage-adapter-opencode = { path = "adapters/opencode" }
 ccusage-adapter-pi = { path = "adapters/pi" }
+ccusage-adapter-prime = { path = "adapters/prime" }
 ccusage-adapter-qwen = { path = "adapters/qwen" }
 ccusage-cli = { path = "crates/ccusage-cli" }
 ccusage-cli-parser = { path = "crates/ccusage-cli-parser" }

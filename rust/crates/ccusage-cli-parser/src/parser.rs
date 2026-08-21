@@ -45,6 +45,8 @@ impl RootAllOptions {
             by_agent: self.by_agent,
             pi_path: None,
             open_claw_path: None,
+            fx_path: None,
+            prime_path: None,
             codex_speed: CodexSpeed::Auto,
         }
     }
@@ -290,6 +292,8 @@ fn parse_command(
             Command::Hermes,
         ),
         "pi" => parse_pi_command(parser, shared, config),
+        "fx" => parse_fx_command(parser, shared, config),
+        "prime" => parse_prime_command(parser, shared, config),
         "goose" => parse_basic_agent_command(
             parser,
             shared,
@@ -405,6 +409,8 @@ fn parse_all_command(
         by_agent,
         pi_path: None,
         open_claw_path: None,
+        fx_path: None,
+        prime_path: None,
         codex_speed: CodexSpeed::Auto,
     }))
 }
@@ -448,6 +454,8 @@ fn parse_top_level_session_command(
         by_agent,
         pi_path: None,
         open_claw_path: None,
+        fx_path: None,
+        prime_path: None,
         codex_speed: CodexSpeed::Auto,
     }))
 }
@@ -605,6 +613,8 @@ fn parse_codex_command(
         by_agent: false,
         pi_path: None,
         open_claw_path: None,
+        fx_path: None,
+        prime_path: None,
         codex_speed,
     }))
 }
@@ -634,7 +644,67 @@ fn parse_pi_command(
         by_agent: false,
         pi_path,
         open_claw_path: None,
+        fx_path: None,
+        prime_path: None,
         codex_speed,
+    }))
+}
+
+fn parse_fx_command(
+    parser: &mut ArgParser,
+    mut shared: SharedArgs,
+    _config: &dyn CliConfig,
+) -> Result<Command, String> {
+    let kind = parse_agent_report_kind(parser, "fx", STANDARD_AGENT_REPORTS)?;
+    let mut fx_path = None;
+    while parser.peek().is_some() {
+        if parse_shared_arg_for_command(parser, &mut shared)? {
+            continue;
+        }
+        match parser.next_flag()?.as_str() {
+            "--fx-path" => fx_path = Some(parser.value_for("--fx-path")?),
+            flag => return Err(format!("Unknown fx option '{flag}'")),
+        }
+    }
+    Ok(Command::Fx(AgentCommandArgs {
+        shared,
+        kind,
+        sections: None,
+        by_agent: false,
+        pi_path: None,
+        open_claw_path: None,
+        fx_path,
+        prime_path: None,
+        codex_speed: CodexSpeed::Auto,
+    }))
+}
+
+fn parse_prime_command(
+    parser: &mut ArgParser,
+    mut shared: SharedArgs,
+    _config: &dyn CliConfig,
+) -> Result<Command, String> {
+    let kind = parse_agent_report_kind(parser, "prime", STANDARD_AGENT_REPORTS)?;
+    let mut prime_path = None;
+    while parser.peek().is_some() {
+        if parse_shared_arg_for_command(parser, &mut shared)? {
+            continue;
+        }
+        match parser.next_flag()?.as_str() {
+            "--prime-path" => prime_path = Some(parser.value_for("--prime-path")?),
+            flag => return Err(format!("Unknown prime option '{flag}'")),
+        }
+    }
+    Ok(Command::Prime(AgentCommandArgs {
+        shared,
+        kind,
+        sections: None,
+        by_agent: false,
+        pi_path: None,
+        open_claw_path: None,
+        fx_path: None,
+        prime_path,
+        codex_speed: CodexSpeed::Auto,
     }))
 }
 
@@ -663,6 +733,8 @@ fn parse_openclaw_command(
         by_agent: false,
         pi_path: None,
         open_claw_path,
+        fx_path: None,
+        prime_path: None,
         codex_speed,
     }))
 }
@@ -693,6 +765,8 @@ fn agent_command_args(shared: SharedArgs, kind: AgentReportKind) -> AgentCommand
         by_agent: false,
         pi_path: None,
         open_claw_path: None,
+        fx_path: None,
+        prime_path: None,
         codex_speed: CodexSpeed::Auto,
     }
 }
@@ -771,6 +845,8 @@ fn is_command(arg: &str) -> bool {
             | "kimi"
             | "qwen"
             | "grok"
+            | "fx"
+            | "prime"
     )
 }
 
@@ -908,6 +984,8 @@ fn option_takes_value(arg: &str) -> bool {
             | "--speed"
             | "--pi-path"
             | "--open-claw-path"
+            | "--fx-path"
+            | "--prime-path"
             | "--sections"
     )
 }
@@ -931,6 +1009,8 @@ fn is_agent_command(command: &str) -> bool {
             | "qwen"
             | "openclaw"
             | "grok"
+            | "fx"
+            | "prime"
     )
 }
 
@@ -943,7 +1023,7 @@ fn agent_report_supported(agent: &str, report: &str) -> bool {
         "codex" => matches!(report, "daily" | "monthly" | "session"),
         "opencode" => matches!(report, "daily" | "weekly" | "monthly" | "session"),
         "amp" | "droid" | "codebuff" | "hermes" | "pi" | "goose" | "kilo" | "copilot"
-        | "gemini" | "kimi" | "qwen" | "openclaw" | "grok" => {
+        | "gemini" | "kimi" | "qwen" | "openclaw" | "grok" | "fx" | "prime" => {
             matches!(report, "daily" | "monthly" | "session")
         }
         _ => false,
@@ -968,6 +1048,8 @@ fn agent_display_name(agent: &str) -> &'static str {
         "qwen" => "Qwen",
         "openclaw" => "OpenClaw",
         "grok" => "Grok",
+        "fx" => "fx",
+        "prime" => "Prime Agent",
         _ => unreachable!("agent is prevalidated"),
     }
 }
@@ -1048,7 +1130,9 @@ fn last_option_error(command: Option<&Command>, root_shared: &SharedArgs) -> Opt
             | Command::Kimi(args)
             | Command::Qwen(args)
             | Command::OpenClaw(args)
-            | Command::Grok(args),
+            | Command::Grok(args)
+            | Command::Fx(args)
+            | Command::Prime(args),
         ) => (&args.shared, args.kind != AgentReportKind::Session),
     };
     shared.last?;

@@ -26,6 +26,8 @@ pub enum Command {
     Qwen(AgentCommandArgs),
     OpenClaw(AgentCommandArgs),
     Grok(AgentCommandArgs),
+    Fx(AgentCommandArgs),
+    Prime(AgentCommandArgs),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -173,6 +175,8 @@ pub struct AgentCommandArgs {
     pub by_agent: bool,
     pub pi_path: Option<String>,
     pub open_claw_path: Option<String>,
+    pub fx_path: Option<String>,
+    pub prime_path: Option<String>,
     pub codex_speed: CodexSpeed,
 }
 

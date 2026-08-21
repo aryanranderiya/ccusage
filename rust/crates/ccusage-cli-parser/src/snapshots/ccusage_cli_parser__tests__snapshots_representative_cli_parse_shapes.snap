@@ -1,5 +1,6 @@
 ---
 source: crates/ccusage-cli-parser/src/tests.rs
+assertion_line: 904
 expression: cases
 ---
 [
@@ -34,9 +35,11 @@ expression: cases
       "command": {
         "byAgent": false,
         "codexSpeed": "Auto",
+        "fxPath": null,
         "kind": "Daily",
         "openClawPath": null,
         "piPath": null,
+        "primePath": null,
         "sections": null,
         "shared": {
           "breakdown": true,
@@ -182,9 +185,11 @@ expression: cases
       "command": {
         "byAgent": false,
         "codexSpeed": "Fast",
+        "fxPath": null,
         "kind": "Monthly",
         "openClawPath": null,
         "piPath": null,
+        "primePath": null,
         "sections": null,
         "shared": {
           "breakdown": false,
@@ -234,9 +239,11 @@ expression: cases
       "command": {
         "byAgent": false,
         "codexSpeed": "Auto",
+        "fxPath": null,
         "kind": "Weekly",
         "openClawPath": null,
         "piPath": null,
+        "primePath": null,
         "sections": null,
         "shared": {
           "breakdown": false,
@@ -286,9 +293,11 @@ expression: cases
       "command": {
         "byAgent": false,
         "codexSpeed": "Auto",
+        "fxPath": null,
         "kind": "Session",
         "openClawPath": null,
         "piPath": "/tmp/pi-sessions",
+        "primePath": null,
         "sections": null,
         "shared": {
           "breakdown": false,
@@ -338,9 +347,11 @@ expression: cases
       "command": {
         "byAgent": false,
         "codexSpeed": "Auto",
+        "fxPath": null,
         "kind": "Session",
         "openClawPath": "/tmp/openclaw",
         "piPath": null,
+        "primePath": null,
         "sections": null,
         "shared": {
           "breakdown": false,
@@ -390,9 +401,11 @@ expression: cases
       "command": {
         "byAgent": false,
         "codexSpeed": "Auto",
+        "fxPath": null,
         "kind": "Daily",
         "openClawPath": null,
         "piPath": null,
+        "primePath": null,
         "sections": null,
         "shared": {
           "breakdown": false,

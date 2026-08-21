@@ -15,6 +15,7 @@ mod adapter {
     pub use ccusage_adapter_codex as codex;
     pub use ccusage_adapter_copilot as copilot;
     pub use ccusage_adapter_droid as droid;
+    pub use ccusage_adapter_fx as fx;
     pub use ccusage_adapter_gemini as gemini;
     pub use ccusage_adapter_goose as goose;
     pub use ccusage_adapter_grok as grok;
@@ -24,6 +25,7 @@ mod adapter {
     pub use ccusage_adapter_openclaw as openclaw;
     pub use ccusage_adapter_opencode as opencode;
     pub use ccusage_adapter_pi as pi;
+    pub use ccusage_adapter_prime as prime;
     pub use ccusage_adapter_qwen as qwen;
 }
 

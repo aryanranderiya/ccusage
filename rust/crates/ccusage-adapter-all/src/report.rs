@@ -406,7 +406,7 @@ pub(super) fn all_table_row(
     let models = if row.agent_breakdowns.is_some() {
         String::new()
     } else {
-        format_models_multiline(&row.models_used)
+        unified_models_multiline(&row.models_used)
     };
 
     if compact {
@@ -441,6 +441,27 @@ pub(super) fn all_table_row(
     values
 }
 
+/// Unified reports carry an Agent column, so per-row model labels drop their
+/// `[store] ` prefixes ("[pi] deepseek-v4-flash" -> "deepseek-v4-flash") and
+/// spend that width on the model name instead.
+fn strip_store_prefix(model: &str) -> &str {
+    let Some(rest) = model.strip_prefix('[') else {
+        return model;
+    };
+    match rest.split_once(']') {
+        Some((_, after)) => after.strip_prefix(' ').unwrap_or(after),
+        None => model,
+    }
+}
+
+fn unified_models_multiline(models: &[String]) -> String {
+    let stripped = models
+        .iter()
+        .map(|model| strip_store_prefix(model).to_string())
+        .collect::<Vec<_>>();
+    format_models_multiline(&stripped)
+}
+
 fn table_total_tokens(row: &AllRow) -> u64 {
     row.input_tokens
         .saturating_add(row.output_tokens)
@@ -459,7 +480,7 @@ fn push_model_breakdown_rows(
             b.input_tokens + b.output_tokens + b.cache_creation_tokens + b.cache_read_tokens;
         let model = color(
             shared,
-            format!("- {}", short_model_name(&b.model_name)),
+            format!("- {}", short_model_name(strip_store_prefix(&b.model_name))),
             Color::Grey,
         );
         if compact {

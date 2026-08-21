@@ -127,6 +127,7 @@ dependencies = [
  "ccusage-adapter-common",
  "ccusage-adapter-copilot",
  "ccusage-adapter-droid",
+ "ccusage-adapter-fx",
  "ccusage-adapter-gemini",
  "ccusage-adapter-goose",
  "ccusage-adapter-grok",
@@ -136,6 +137,7 @@ dependencies = [
  "ccusage-adapter-openclaw",
  "ccusage-adapter-opencode",
  "ccusage-adapter-pi",
+ "ccusage-adapter-prime",
  "ccusage-adapter-qwen",
  "ccusage-cli",
  "ccusage-cli-parser",
@@ -159,6 +161,7 @@ dependencies = [
  "ccusage-adapter-common",
  "ccusage-adapter-copilot",
  "ccusage-adapter-droid",
+ "ccusage-adapter-fx",
  "ccusage-adapter-gemini",
  "ccusage-adapter-goose",
  "ccusage-adapter-grok",
@@ -168,6 +171,7 @@ dependencies = [
  "ccusage-adapter-openclaw",
  "ccusage-adapter-opencode",
  "ccusage-adapter-pi",
+ "ccusage-adapter-prime",
  "ccusage-adapter-qwen",
  "ccusage-cli",
  "ccusage-core",
@@ -260,6 +264,20 @@ dependencies = [
  "ccusage-core",
  "ccusage-test-support",
  "jiff",
+ "serde_json",
+]
+
+[[package]]
+name = "ccusage-adapter-fx"
+version = "0.0.0"
+dependencies = [
+ "ccusage-adapter-common",
+ "ccusage-cli",
+ "ccusage-core",
+ "ccusage-test-support",
+ "insta",
+ "jiff",
+ "serde",
  "serde_json",
 ]
 
@@ -374,6 +392,17 @@ dependencies = [
  "jiff",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "ccusage-adapter-prime"
+version = "0.0.0"
+dependencies = [
+ "ccusage-adapter-common",
+ "ccusage-adapter-pi",
+ "ccusage-cli",
+ "ccusage-core",
+ "ccusage-test-support",
 ]
 
 [[package]]

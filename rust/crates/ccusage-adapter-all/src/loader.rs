@@ -11,8 +11,8 @@ use crate::{
     BUILT_IN_AGENT_NAMES, CodexGroup, LoadedEntry, ModelBreakdown, PricingMap, Result,
     SessionAccumulator, UsageSummary,
     adapter::{
-        amp, claude, codebuff, codex, copilot, droid, gemini, goose, grok, hermes, kilo, kimi,
-        openclaw, opencode, pi, qwen,
+        amp, claude, codebuff, codex, copilot, droid, fx, gemini, goose, grok, hermes, kilo, kimi,
+        openclaw, opencode, pi, prime, qwen,
     },
     cli::{AgentReportKind, CodexSpeed, NamedPiStore, SharedArgs, WeekDay},
     filter_loaded_entries_by_date, json_float,
@@ -325,6 +325,36 @@ fn load_base_rows(
                 Ok(rows)
             }),
         },
+        AgentLoadSpec {
+            index: 16,
+            agent: BUILT_IN_AGENT_NAMES[16],
+            progress_agent: crate::progress::UsageLoadAgent("fx"),
+            load: Box::new(|| {
+                let mut rows = load_summary_agent_rows(
+                    "fx",
+                    load_kind,
+                    &loader_shared,
+                    || fx::load_entries(&loader_shared, None, Some(pricing)),
+                    fx::summarize_entries,
+                )?;
+                rows.detected = rows.detected || fx::has_data();
+                Ok(rows)
+            }),
+        },
+        AgentLoadSpec {
+            index: 17,
+            agent: BUILT_IN_AGENT_NAMES[17],
+            progress_agent: crate::progress::UsageLoadAgent("prime"),
+            load: Box::new(|| {
+                load_prime_format_agent_rows(
+                    "prime",
+                    None,
+                    load_kind,
+                    &loader_shared,
+                    pricing,
+                )
+            }),
+        },
     ];
     let named_pi_stores = resolve_named_pi_store_paths(&shared.pi_stores)?;
     for store in named_pi_stores {
@@ -544,6 +574,30 @@ fn load_pi_format_agent_rows(
     } else {
         filter_loaded_entries_by_date(&mut entries, shared);
         pi::summarize_entries(&entries, kind)?
+    };
+    Ok(AgentRows {
+        rows: summary_rows(agent, summaries, true),
+        detected,
+    })
+}
+
+/// Prime-agent sessions are pi-format stores loaded under their own name so
+/// reports label them "prime" instead of mixing into the default pi store.
+fn load_prime_format_agent_rows(
+    agent: &'static str,
+    custom_path: Option<&str>,
+    kind: AgentReportKind,
+    shared: &SharedArgs,
+    pricing: &PricingMap,
+) -> Result<AgentRows> {
+    let mut entries = prime::load_entries(shared, custom_path, Some(pricing))?;
+    let detected = !entries.is_empty();
+    let summaries = if kind == AgentReportKind::Session {
+        filter_loaded_entries_by_date(&mut entries, shared);
+        summarize_entry_sessions(&entries)?
+    } else {
+        filter_loaded_entries_by_date(&mut entries, shared);
+        prime::summarize_entries(&entries, kind)?
     };
     Ok(AgentRows {
         rows: summary_rows(agent, summaries, true),

@@ -48,6 +48,8 @@ fn main() -> Result<()> {
         Some(Command::Kimi(args)) => adapter::kimi::run(args),
         Some(Command::OpenClaw(args)) => adapter::openclaw::run(args),
         Some(Command::Grok(args)) => adapter::grok::run(args),
+        Some(Command::Fx(args)) => adapter::fx::run(args),
+        Some(Command::Prime(args)) => adapter::prime::run(args),
         None => {
             let args = AgentCommandArgs {
                 shared: cli.shared,
@@ -56,6 +58,8 @@ fn main() -> Result<()> {
                 by_agent: false,
                 pi_path: None,
                 open_claw_path: None,
+                fx_path: None,
+                prime_path: None,
                 codex_speed: cli::CodexSpeed::Auto,
             };
             adapter::all::run(args)

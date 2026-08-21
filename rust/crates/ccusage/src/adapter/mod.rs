@@ -13,5 +13,7 @@ pub(crate) use ccusage_adapter_kilo as kilo;
 pub(crate) use ccusage_adapter_kimi as kimi;
 pub(crate) use ccusage_adapter_openclaw as openclaw;
 pub(crate) use ccusage_adapter_opencode as opencode;
+pub(crate) use ccusage_adapter_fx as fx;
 pub(crate) use ccusage_adapter_pi as pi;
+pub(crate) use ccusage_adapter_prime as prime;
 pub(crate) use ccusage_adapter_qwen as qwen;

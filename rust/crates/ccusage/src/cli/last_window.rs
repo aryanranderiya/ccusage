@@ -49,7 +49,9 @@ fn window_target(cli: &mut Cli) -> Option<(&mut SharedArgs, PeriodUnit, WeekDay)
             | Command::Kimi(args)
             | Command::Qwen(args)
             | Command::OpenClaw(args)
-            | Command::Grok(args),
+            | Command::Grok(args)
+            | Command::Fx(args)
+            | Command::Prime(args),
         ) => agent_window_target(args),
         Some(Command::Session(_) | Command::Blocks(_) | Command::Statusline(_)) => None,
     }
@@ -93,6 +95,8 @@ mod tests {
             by_agent: false,
             pi_path: None,
             open_claw_path: None,
+            fx_path: None,
+            prime_path: None,
             codex_speed: CodexSpeed::Auto,
         }
     }
