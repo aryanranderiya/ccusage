@@ -1,3 +1,5 @@
+use std::io::IsTerminal;
+
 mod loader;
 mod report;
 mod types;
@@ -118,6 +120,20 @@ pub fn run(args: AgentCommandArgs) -> Result<()> {
     if wants_json(&shared) {
         let output = report::report_json_with_agents(&result.rows, kind, include_agents);
         return print_json_or_jq(output, shared.jq.as_deref(), shared.no_cost);
+    }
+    // Interactive terminals get the grouped summary view by default; pipes,
+    // scripts, --breakdown, and section lists keep the full tables.
+    let interactive = !shared.breakdown
+        && args.sections.is_none()
+        && matches!(kind, AgentReportKind::Daily)
+        && std::io::stdout().is_terminal();
+    if interactive {
+        return report::print_summary_view(
+            &result.rows,
+            kind,
+            &shared,
+            &result.detected_agents,
+        );
     }
     report::print_table(&result.rows, kind, &shared, &result.detected_agents)
 }

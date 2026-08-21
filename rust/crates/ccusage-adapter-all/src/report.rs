@@ -643,3 +643,142 @@ fn agent_label(agent: &str) -> &str {
         _ => agent,
     }
 }
+
+/// The default interactive view for unified reports: a grouped summary that
+/// leads with what you actually ask for — which agents ran, on what models,
+/// and what they cost, per day. Renders only on a TTY; pipes keep tables.
+pub(super) fn print_summary_view(
+    rows: &[AllRow],
+    kind: AgentReportKind,
+    shared: &SharedArgs,
+    detected_agents: &[&'static str],
+) -> Result<()> {
+    let width = crate::terminal_width().max(60) as usize;
+    println!();
+    print_box_title(&all_report_title(kind, rows, detected_agents), shared);
+    if rows.is_empty() {
+        eprintln!("No usage data found.");
+        return Ok(());
+    }
+
+    // Column plan: indent + agent | models | tokens | money.
+    let agent_width = rows
+        .iter()
+        .filter_map(|row| row.agent_breakdowns.as_ref())
+        .flatten()
+        .map(|agent| strip_store_prefix(agent.agent).len())
+        .max()
+        .unwrap_or(5)
+        .clamp(4, 12);
+    let tok_width = 9;
+    let models_budget = width
+        .saturating_sub(3 + agent_width + 2 + tok_width + 2 + 10 + 2)
+        .clamp(14, 46);
+
+    let dim = |value: String| color(shared, value, Color::Grey);
+    let bold = |value: String| color(shared, value, Color::Bold);
+
+    for (index, row) in rows.iter().enumerate() {
+        if index > 0 {
+            println!();
+        }
+        let day_cost = format_currency(row.total_cost);
+        let label = humanize_period(&row.period);
+        let pad = width.saturating_sub(label.len() + day_cost.len() + 1);
+        println!(" {}{}{}", bold(label), " ".repeat(pad), bold(day_cost));
+        println!(" {}", dim("─".repeat(width.saturating_sub(2))));
+
+        let Some(breakdowns) = row.agent_breakdowns.as_ref() else {
+            continue;
+        };
+        for agent in breakdowns {
+            let name = strip_store_prefix(agent.agent);
+            let models = condensed_models(&agent.models_used, models_budget);
+            println!(
+                "   {:<aw$}  {:<mb$}  {:>tw$}  {:>cw$}",
+                name,
+                models,
+                short_tokens(table_total_tokens(agent)),
+                format_currency(agent.total_cost),
+                aw = agent_width,
+                mb = models_budget,
+                tw = tok_width,
+                cw = 9,
+            );
+        }
+    }
+
+    println!();
+    println!(" {}", dim("─".repeat(width.saturating_sub(2))));
+    let totals = totals_value_rows(rows);
+    println!(
+        " {}{}{}  {:>tw$}  {:>cw$}",
+        bold("TOTAL".to_string()),
+        " ".repeat(width.saturating_sub(5 + 11 + 4)),
+        dim(format!("{} days", rows.len())),
+        bold(short_tokens(rows.iter().map(table_total_tokens).sum())),
+        bold(format_currency(totals)),
+        tw = tok_width,
+        cw = 9,
+    );
+    Ok(())
+}
+
+fn totals_value_rows(rows: &[AllRow]) -> f64 {
+    rows.iter().map(|row| row.total_cost).sum()
+}
+
+const MONTHS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/// `2026-08-22` -> `Aug 22`; weekly (`2026-W33`) and monthly (`2026-08`)
+/// keys pass through unchanged.
+fn humanize_period(period: &str) -> String {
+    if period.len() == 10 && period.as_bytes()[4] == b'-' {
+        let month = period.get(5..7).and_then(|m| m.parse::<usize>().ok());
+        let day = period.get(8..10).unwrap_or("");
+        if let Some(month) = month.filter(|m| (1..=12).contains(m)) {
+            return format!("{} {}", MONTHS[month - 1], day);
+        }
+    }
+    period.to_string()
+}
+
+/// First models joined by ' · ', trimmed to the budget with an "+n" tail.
+fn condensed_models(models: &[String], budget: usize) -> String {
+    if models.is_empty() {
+        return String::new();
+    }
+    let mut used = 0usize;
+    let mut kept: Vec<String> = Vec::new();
+    for model in models {
+        let piece = short_model_name(strip_store_prefix(model));
+        let extra = if kept.is_empty() { piece.len() } else { piece.len() + 3 };
+        if !kept.is_empty() && used + extra > budget {
+            return format!("{} …+{}", kept.join(" · "), models.len() - kept.len());
+        }
+        used += extra;
+        kept.push(piece);
+    }
+    kept.join(" · ")
+}
+
+fn short_tokens(tokens: u64) -> String {
+    let value = tokens as f64;
+    if tokens >= 1_000_000_000 {
+        format!("{:.2}B", value / 1e9)
+    } else if tokens >= 1_000_000 {
+        let mut text = format!("{:.2}", value / 1e6);
+        if text.ends_with("00") {
+            text.truncate(text.len() - 3);
+        } else if text.ends_with('0') {
+            text.truncate(text.len() - 1);
+        }
+        format!("{text}M")
+    } else if tokens >= 1_000 {
+        format!("{:.0}k", value / 1e3)
+    } else {
+        format!("{tokens}")
+    }
+}
