@@ -28,6 +28,15 @@ pub enum Command {
     Grok(AgentCommandArgs),
     Fx(AgentCommandArgs),
     Prime(AgentCommandArgs),
+    Sync(SyncArgs),
+}
+
+#[derive(Clone)]
+pub struct SyncArgs {
+    pub shared: SharedArgs,
+    pub repo: Option<String>,
+    pub machine: Option<String>,
+    pub no_push: bool,
 }
 
 #[derive(Clone, Debug, Default)]

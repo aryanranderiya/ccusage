@@ -50,6 +50,7 @@ fn main() -> Result<()> {
         Some(Command::Grok(args)) => adapter::grok::run(args),
         Some(Command::Fx(args)) => adapter::fx::run(args),
         Some(Command::Prime(args)) => adapter::prime::run(args),
+        Some(Command::Sync(args)) => commands::sync::run_sync(args),
         None => {
             let args = AgentCommandArgs {
                 shared: cli.shared,

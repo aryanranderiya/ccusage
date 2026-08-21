@@ -207,6 +207,13 @@ fn command_snapshot(command: Option<Command>) -> Value {
         Some(Command::Grok(args)) => agent_command_snapshot("grok", args),
         Some(Command::Fx(args)) => agent_command_snapshot("fx", args),
         Some(Command::Prime(args)) => agent_command_snapshot("prime", args),
+        Some(Command::Sync(args)) => json!({
+            "type": "sync",
+            "shared": shared_snapshot(&args.shared),
+            "repo": args.repo,
+            "machine": args.machine,
+            "noPush": args.no_push,
+        }),
     }
 }
 

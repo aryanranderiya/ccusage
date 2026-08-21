@@ -80,7 +80,7 @@ pub(super) fn load_sections(
     })
 }
 
-fn load_pricing(shared: &SharedArgs) -> PricingMap {
+pub(super) fn load_pricing(shared: &SharedArgs) -> PricingMap {
     PricingMap::load_with_overrides(
         shared.offline,
         crate::log_level() != Some(0),

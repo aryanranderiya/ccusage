@@ -5,8 +5,8 @@ use crate::help::{print_help_and_exit, print_version_and_exit};
 use ccusage_cli::{
     AgentCommandArgs, AgentReportKind, BlocksArgs, CliConfig, CodexSpeed, Command, CostMode,
     CostSource, DATE_BOUND_FORMATS, DailyArgs, OPENCODE_AGENT_REPORTS, STANDARD_AGENT_REPORTS,
-    SessionArgs, SharedArgs, SortOrder, StatuslineArgs, VisualBurnRate, WeekDay, WeeklyArgs,
-    normalize_date_bound,
+    SessionArgs, SharedArgs, SortOrder, StatuslineArgs, SyncArgs, VisualBurnRate, WeekDay,
+    WeeklyArgs, normalize_date_bound,
 };
 
 use crate::Cli;
@@ -294,6 +294,7 @@ fn parse_command(
         "pi" => parse_pi_command(parser, shared, config),
         "fx" => parse_fx_command(parser, shared, config),
         "prime" => parse_prime_command(parser, shared, config),
+        "sync" => parse_sync_command(parser, shared),
         "goose" => parse_basic_agent_command(
             parser,
             shared,
@@ -650,6 +651,32 @@ fn parse_pi_command(
     }))
 }
 
+fn parse_sync_command(
+    parser: &mut ArgParser,
+    mut shared: SharedArgs,
+) -> Result<Command, String> {
+    let mut repo = None;
+    let mut machine = None;
+    let mut no_push = false;
+    while parser.peek().is_some() {
+        if parse_shared_arg_for_command(parser, &mut shared)? {
+            continue;
+        }
+        match parser.next_flag()?.as_str() {
+            "--repo" => repo = Some(parser.value_for("--repo")?),
+            "--machine" => machine = Some(parser.value_for("--machine")?),
+            "--no-push" => no_push = true,
+            flag => return Err(format!("Unknown sync option '{flag}'")),
+        }
+    }
+    Ok(Command::Sync(SyncArgs {
+        shared,
+        repo,
+        machine,
+        no_push,
+    }))
+}
+
 fn parse_fx_command(
     parser: &mut ArgParser,
     mut shared: SharedArgs,
@@ -829,6 +856,7 @@ fn is_command(arg: &str) -> bool {
             | "session"
             | "blocks"
             | "statusline"
+            | "sync"
             | "claude"
             | "codex"
             | "opencode"
@@ -986,6 +1014,8 @@ fn option_takes_value(arg: &str) -> bool {
             | "--open-claw-path"
             | "--fx-path"
             | "--prime-path"
+            | "--repo"
+            | "--machine"
             | "--sections"
     )
 }
@@ -1134,6 +1164,7 @@ fn last_option_error(command: Option<&Command>, root_shared: &SharedArgs) -> Opt
             | Command::Fx(args)
             | Command::Prime(args),
         ) => (&args.shared, args.kind != AgentReportKind::Session),
+        Some(Command::Sync(_)) => (root_shared, false),
     };
     shared.last?;
     if !supported {

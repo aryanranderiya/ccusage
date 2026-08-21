@@ -15,7 +15,8 @@
 	},
 	"funding": "https://github.com/sponsors/ryoppippi",
 	"bin": {
-		"ccusage": "./src/cli.js"
+		"ccusage": "./src/cli.js",
+		"ccusage2": "./src/cli.js"
 	},
 	"files": [
 		"config-schema.json",

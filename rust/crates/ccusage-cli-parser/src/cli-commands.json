@@ -88,6 +88,10 @@
         "description": "Display compact status line for Claude Code hooks with hybrid time+file caching (Beta)"
       },
       {
+        "name": "sync",
+        "description": "Back up local usage to a GitHub repo, pull other machines' data, and show coalesced totals"
+      },
+      {
         "name": "claude",
         "description": "Show Claude Code usage commands"
       },
@@ -169,6 +173,15 @@
       "description": "Show all detected coding (agent) CLI usage grouped by date",
       "usage": "ccusage daily <OPTIONS>",
       "options": "all_agent_period_options"
+    },
+    {
+      "path": [
+        "sync"
+      ],
+      "description": "Back up and coalesce usage across machines via GitHub.",
+      "usage": "ccusage sync <OPTIONS>",
+      "commands": [],
+      "options": "sync_options"
     },
     {
       "path": [

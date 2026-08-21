@@ -456,5 +456,19 @@
         "saturday"
       ]
     }
+  ],
+  "sync_options": [
+    {
+      "flags": "--repo <repo>",
+      "description": "Sync repository: owner/name shorthand or any git URL (env: CCUSAGE_SYNC_REPO)"
+    },
+    {
+      "flags": "--machine <name>",
+      "description": "Machine name for this device's snapshot (default: hostname)"
+    },
+    {
+      "flags": "--no-push",
+      "description": "Merge remote machines into the report without publishing local data"
+    }
   ]
 }

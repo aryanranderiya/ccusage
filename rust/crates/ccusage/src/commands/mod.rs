@@ -28,6 +28,8 @@ use crate::{
     utc_now, wants_json,
 };
 
+pub(crate) mod sync;
+
 pub(crate) fn run_daily(args: DailyArgs) -> Result<()> {
     let shared = args.shared.clone();
     let mut rows = load_daily_summaries(

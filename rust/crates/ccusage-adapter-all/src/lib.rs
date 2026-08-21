@@ -31,9 +31,62 @@ mod adapter {
 
 use crate::{
     Result,
-    cli::{AgentCommandArgs, AgentReportKind},
+    cli::{AgentCommandArgs, AgentReportKind, SharedArgs},
     print_json_or_jq, wants_json,
 };
+
+/// One flattened daily usage cell: a single date, agent, and model with its
+/// token and cost totals. The sync feature aggregates every loaded source
+/// into these rows so per-machine snapshots stay small and mergeable.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SyncUsageRow {
+    pub date: String,
+    pub agent: String,
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_creation_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cost: f64,
+}
+
+/// Loads every detected agent source and flattens the daily report into
+/// per-date/per-agent/per-model rows. Cost semantics match the daily report
+/// (auto mode: embedded display cost when present, otherwise priced).
+pub fn collect_sync_rows(shared: &SharedArgs) -> Result<Vec<SyncUsageRow>> {
+    
+    let result = loader::load_rows(AgentReportKind::Daily, shared)?;
+    let mut rows = Vec::new();
+    for row in &result.rows {
+        let Some(breakdowns) = row.agent_breakdowns.as_ref() else {
+            continue;
+        };
+        for agent in breakdowns {
+            for model in &agent.model_breakdowns {
+                if model.input_tokens
+                    + model.output_tokens
+                    + model.cache_creation_tokens
+                    + model.cache_read_tokens
+                    + model.extra_total_tokens
+                    == 0
+                {
+                    continue;
+                }
+                rows.push(SyncUsageRow {
+                    date: row.period.clone(),
+                    agent: agent.agent.to_string(),
+                    model: model.model_name.clone(),
+                    input_tokens: model.input_tokens,
+                    output_tokens: model.output_tokens,
+                    cache_creation_tokens: model.cache_creation_tokens,
+                    cache_read_tokens: model.cache_read_tokens,
+                    cost: model.cost,
+                });
+            }
+        }
+    }
+    Ok(rows)
+}
 
 pub fn run(args: AgentCommandArgs) -> Result<()> {
     let kind = args.kind;
