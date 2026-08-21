@@ -644,16 +644,18 @@ fn agent_label(agent: &str) -> &str {
     }
 }
 
-/// The default interactive view for unified reports: a grouped summary that
-/// leads with what you actually ask for — which agents ran, on what models,
-/// and what they cost, per day. Renders only on a TTY; pipes keep tables.
+/// The default interactive view for unified reports: day sections, one line
+/// per model with its own numbers, agent subtotals above them, and cache
+/// traffic present but dimmed so live tokens stay the focus. Capped at a
+/// comfortable reading width. Renders only on a TTY; pipes keep tables.
 pub(super) fn print_summary_view(
     rows: &[AllRow],
     kind: AgentReportKind,
     shared: &SharedArgs,
     detected_agents: &[&'static str],
 ) -> Result<()> {
-    let width = crate::terminal_width().max(60) as usize;
+    const MAX_WIDTH: usize = 104;
+    let width = (crate::terminal_width().max(64) as usize).min(MAX_WIDTH);
     println!();
     print_box_title(&all_report_title(kind, rows, detected_agents), shared);
     if rows.is_empty() {
@@ -661,19 +663,23 @@ pub(super) fn print_summary_view(
         return Ok(());
     }
 
-    // Column plan: indent + agent | models | tokens | money.
-    let agent_width = rows
+    // Column plan per model line:
+    // indent(5) | model name | in | out | cache (dim) | money
+    let name_width = rows
         .iter()
         .filter_map(|row| row.agent_breakdowns.as_ref())
         .flatten()
-        .map(|agent| strip_store_prefix(agent.agent).len())
+        .flat_map(|agent| &agent.model_breakdowns)
+        .map(|model| short_model_name(strip_store_prefix(&model.model_name)).len())
         .max()
-        .unwrap_or(5)
-        .clamp(4, 12);
-    let tok_width = 9;
-    let models_budget = width
-        .saturating_sub(3 + agent_width + 2 + tok_width + 2 + 10 + 2)
-        .clamp(14, 46);
+        .unwrap_or(6)
+        .clamp(6, 30);
+    let num_width = 9;
+    let cost_width = 9;
+    // Cache column gets whatever remains, minimum enough for "cached 999.99M".
+    let cache_width = width
+        .saturating_sub(5 + name_width + 2 + num_width + 2 + num_width + 2 + cost_width + 3)
+        .clamp(15, 34);
 
     let dim = |value: String| color(shared, value, Color::Grey);
     let bold = |value: String| color(shared, value, Color::Bold);
@@ -682,50 +688,80 @@ pub(super) fn print_summary_view(
         if index > 0 {
             println!();
         }
-        let day_cost = format_currency(row.total_cost);
-        let label = humanize_period(&row.period);
-        let pad = width.saturating_sub(label.len() + day_cost.len() + 1);
-        println!(" {}{}{}", bold(label), " ".repeat(pad), bold(day_cost));
-        println!(" {}", dim("─".repeat(width.saturating_sub(2))));
+        // Day header: date left, thin rule filling the middle, cost right.
+        let label = format!(" {}", humanize_period(&row.period));
+        let cost_text = format_currency(row.total_cost);
+        let fill = width.saturating_sub(label.len() + cost_text.len()).max(3);
+        print!("{label} {}", dim("─".repeat(fill)));
+        println!(" {}", bold(cost_text));
 
         let Some(breakdowns) = row.agent_breakdowns.as_ref() else {
             continue;
         };
         for agent in breakdowns {
+            // Agent subtotal line: name left, its cost right.
             let name = strip_store_prefix(agent.agent);
-            let models = condensed_models(&agent.models_used, models_budget);
+            let agent_cost = format_currency(agent.total_cost);
+            let used = 3 + name.len();
+            let fill = width.saturating_sub(used + agent_cost.len()).max(2);
             println!(
-                "   {:<aw$}  {:<mb$}  {:>tw$}  {:>cw$}",
-                name,
-                models,
-                short_tokens(table_total_tokens(agent)),
-                format_currency(agent.total_cost),
-                aw = agent_width,
-                mb = models_budget,
-                tw = tok_width,
-                cw = 9,
+                "   {}{}{}",
+                bold(name.to_string()),
+                dim("·".repeat(fill)),
+                bold(agent_cost)
             );
+            for model in &agent.model_breakdowns {
+                if model.input_tokens
+                    + model.output_tokens
+                    + model.cache_read_tokens
+                    + model.cache_creation_tokens
+                    == 0
+                {
+                    continue;
+                }
+                let model_name = short_model_name(strip_store_prefix(&model.model_name));
+                let cache = dim(cache_segment(
+                    model.cache_read_tokens,
+                    model.cache_creation_tokens,
+                    cache_width,
+                ));
+                println!(
+                    "     {:<nw$} {:>iw$} {:>ow$} {:>cw$} {:>mw$}",
+                    model_name,
+                    format!("↑{}", short_tokens(model.input_tokens)),
+                    format!("↓{}", short_tokens(model.output_tokens)),
+                    cache,
+                    format_currency(model.cost),
+                    nw = name_width,
+                    iw = num_width,
+                    ow = num_width,
+                    cw = cache_width,
+                    mw = cost_width,
+                );
+            }
         }
     }
 
+    // Totals footer. Measure with plain text; coloring adds invisible bytes.
+    let total_tokens = rows.iter().map(table_total_tokens).sum::<u64>();
+    let total_cost_text = format_currency(rows.iter().map(|row| row.total_cost).sum());
+    let meta = format!("{} days · {} tokens", rows.len(), short_tokens(total_tokens));
+    let used = 2 + "TOTAL".len() + 2 + meta.len() + 1 + total_cost_text.len();
+    let fill = width.saturating_sub(used).max(3);
     println!();
-    println!(" {}", dim("─".repeat(width.saturating_sub(2))));
-    let totals = totals_value_rows(rows);
-    println!(
-        " {}{}{}  {:>tw$}  {:>cw$}",
-        bold("TOTAL".to_string()),
-        " ".repeat(width.saturating_sub(5 + 11 + 4)),
-        dim(format!("{} days", rows.len())),
-        bold(short_tokens(rows.iter().map(table_total_tokens).sum())),
-        bold(format_currency(totals)),
-        tw = tok_width,
-        cw = 9,
-    );
+    print!("  {}", bold("TOTAL".to_string()));
+    print!("{}", dim(format!("  {meta} ")));
+    println!("{} {}", dim("─".repeat(fill)), bold(total_cost_text));
     Ok(())
 }
 
-fn totals_value_rows(rows: &[AllRow]) -> f64 {
-    rows.iter().map(|row| row.total_cost).sum()
+/// Cache traffic rendered dim: reads always, writes only when present.
+fn cache_segment(read: u64, creation: u64, _width: usize) -> String {
+    if creation > 0 {
+        format!("cached +{} / {}", short_tokens(creation), short_tokens(read))
+    } else {
+        format!("cached {}", short_tokens(read))
+    }
 }
 
 const MONTHS: [&str; 12] = [
@@ -745,24 +781,6 @@ fn humanize_period(period: &str) -> String {
     period.to_string()
 }
 
-/// First models joined by ' · ', trimmed to the budget with an "+n" tail.
-fn condensed_models(models: &[String], budget: usize) -> String {
-    if models.is_empty() {
-        return String::new();
-    }
-    let mut used = 0usize;
-    let mut kept: Vec<String> = Vec::new();
-    for model in models {
-        let piece = short_model_name(strip_store_prefix(model));
-        let extra = if kept.is_empty() { piece.len() } else { piece.len() + 3 };
-        if !kept.is_empty() && used + extra > budget {
-            return format!("{} …+{}", kept.join(" · "), models.len() - kept.len());
-        }
-        used += extra;
-        kept.push(piece);
-    }
-    kept.join(" · ")
-}
 
 fn short_tokens(tokens: u64) -> String {
     let value = tokens as f64;
