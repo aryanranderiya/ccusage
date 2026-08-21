@@ -238,7 +238,7 @@ pub(crate) fn run_sync(args: crate::cli::SyncArgs) -> Result<()> {
     if crate::wants_json(shared) {
         return print_sync_json(&rows, &machines, shared);
     }
-    print_sync_table(&rows, &machines, shared)
+    print_sync_table(rows, &machines, shared, args.by_machine)
 }
 
 fn print_sync_json(rows: &[MergedRow], machines: &[String], shared: &SharedArgs) -> Result<()> {
@@ -290,11 +290,48 @@ fn totals_value(rows: &[MergedRow]) -> Value {
     })
 }
 
-/// Coalesced view grouped by date; the Agent column carries the machine
-/// (`pi @mbp`) so multi-machine reports stay skimmable while every token
-/// stays attributable.
-fn print_sync_table(rows: &[MergedRow], machines: &[String], shared: &SharedArgs) -> Result<()> {
+/// Sums machine rows together so the default view shows one line per day and
+/// agent across every device.
+fn collapse_machines(rows: Vec<MergedRow>) -> Vec<MergedRow> {
+    let mut index = std::collections::HashMap::<(String, String), MergedRow>::new();
+    let mut order: Vec<(String, String)> = Vec::new();
+    for row in rows {
+        let key = (row.date.clone(), row.agent.clone());
+        match index.get_mut(&key) {
+            Some(target) => {
+                target.input_tokens += row.input_tokens;
+                target.output_tokens += row.output_tokens;
+                target.cache_creation_tokens += row.cache_creation_tokens;
+                target.cache_read_tokens += row.cache_read_tokens;
+                target.cost += row.cost;
+            }
+            None => {
+                order.push(key.clone());
+                index.insert(key, row);
+            }
+        }
+    }
+    order
+        .into_iter()
+        .map(|key| index.remove(&key).expect("inserted above"))
+        .collect()
+}
+
+/// Coalesced view grouped by date. Default merges all machines into one row
+/// per agent; `--by-machine` adds a dedicated Machine column instead of
+/// hiding which device produced the usage.
+fn print_sync_table(
+    mut rows: Vec<MergedRow>,
+    machines: &[String],
+    shared: &SharedArgs,
+    by_machine: bool,
+) -> Result<()> {
     println!();
+    if by_machine {
+        rows.sort_by(|a, b| (&a.date, &a.machine, &a.agent).cmp(&(&b.date, &b.machine, &b.agent)));
+    } else {
+        rows = collapse_machines(rows);
+    }
     crate::print_box_title(
         &format!(
             "GitHub Sync Report - {} - {} machine{}",
@@ -305,39 +342,68 @@ fn print_sync_table(rows: &[MergedRow], machines: &[String], shared: &SharedArgs
         shared,
     );
 
-    let headers = ["Date", "Agent", "Input", "Output", "Cache Read", "Cost (USD)"];
-    let aligns = [
-        Align::Left,
-        Align::Left,
-        Align::Right,
-        Align::Right,
-        Align::Right,
-        Align::Right,
-    ];
-    let mut table = SimpleTable::new(headers.to_vec(), aligns.to_vec(), terminal_style(shared))
+    let (headers, aligns): (Vec<&str>, Vec<Align>) = if by_machine {
+        (
+            vec![
+                "Date",
+                "Machine",
+                "Agent",
+                "Input",
+                "Output",
+                "Cache Read",
+                "Cost (USD)",
+            ],
+            vec![
+                Align::Left,
+                Align::Left,
+                Align::Left,
+                Align::Right,
+                Align::Right,
+                Align::Right,
+                Align::Right,
+            ],
+        )
+    } else {
+        (
+            vec!["Date", "Agent", "Input", "Output", "Cache Read", "Cost (USD)"],
+            vec![
+                Align::Left,
+                Align::Left,
+                Align::Right,
+                Align::Right,
+                Align::Right,
+                Align::Right,
+            ],
+        )
+    };
+    let mut table = SimpleTable::new(headers, aligns, terminal_style(shared))
         .with_terminal_width(crate::terminal_width())
         .with_date_compaction(true);
     let mut current_date = String::new();
-    for row in rows {
+    for row in &rows {
         let label = if row.date != current_date {
             current_date = row.date.clone();
             row.date.clone()
         } else {
             String::new()
         };
-        table.push(vec![
+        let mut values = vec![
             label,
-            format!("{} @{}", row.agent, row.machine),
+            row.agent.clone(),
             format_number(row.input_tokens),
             format_number(row.output_tokens),
             format_number(row.cache_read_tokens),
             format_currency(row.cost),
-        ]);
+        ];
+        if by_machine {
+            values.insert(1, row.machine.clone());
+        }
+        table.push(values);
     }
-    let totals = totals_value(rows);
+    let totals = totals_value(&rows);
     table.separator();
     let yellow = |value: String| color(shared, value, Color::Yellow);
-    table.push(vec![
+    let mut total_row = vec![
         yellow("Total".to_string()),
         String::new(),
         yellow(format_number(
@@ -352,7 +418,11 @@ fn print_sync_table(rows: &[MergedRow], machines: &[String], shared: &SharedArgs
         yellow(format_currency(
             totals.get("totalCost").and_then(Value::as_f64).unwrap_or(0.0),
         )),
-    ]);
+    ];
+    if by_machine {
+        total_row.insert(1, String::new());
+    }
+    table.push(total_row);
     table.print()?;
     Ok(())
 }

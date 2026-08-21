@@ -2073,6 +2073,12 @@ fn pricing_alias(model: &str) -> Option<&'static str> {
     match model {
         "gpt-5.6" => Some("gpt-5.6-sol"),
         "gpt-5.3-spark" => Some("gpt-5.3-codex-spark"),
+        // GLM-5.2 ships at the same published rates as GLM-5.1 (in/out
+        // identical across dashscope, Fireworks, and Mistral listings), but
+        // z.ai's own `zai/glm-5.2` id has no LiteLLM entry yet, so fx usage
+        // would price as free without this bridge.
+        "zai/glm-5.2" | "glm-5.2" => Some("zai/glm-5.1"),
+        "zai/glm-5.2-fast" | "glm-5.2-fast" => Some("zai/glm-5.1"),
         _ => None,
     }
 }

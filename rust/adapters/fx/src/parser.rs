@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 use crate::{
     LoadedEntry, PricingMap, Result, TokenUsageRaw, UsageEntry, UsageMessage,
-    calculate_cost_for_usage, cli::CostMode, fast::LinePrefilter, format_date_tz,
+    calculate_cost_from_pricing, cli::CostMode, fast::LinePrefilter, format_date_tz,
     missing_pricing_model_for_usage,
 };
 use ccusage_adapter_common::jsonl;
@@ -92,6 +92,26 @@ pub fn read_data_dir(
     Ok(entries)
 }
 
+/// Prices usage by the model id exactly as the source wrote it, bypassing
+/// the "[fx] "-prefixed display label.
+fn calculate_cost_from_tokens_raw(
+    raw_model: Option<&str>,
+    usage: TokenUsageRaw,
+    mode: CostMode,
+    pricing: Option<&PricingMap>,
+) -> f64 {
+    if mode == CostMode::Display || raw_model.is_none() {
+        return 0.0;
+    }
+    let Some(pricing) = pricing else {
+        return 0.0;
+    };
+    pricing
+        .find(raw_model.expect("checked above"))
+        .map(|pricing| calculate_cost_from_pricing(usage, pricing))
+        .unwrap_or(0.0)
+}
+
 fn loaded_entry(
     fact: FxGeneration,
     session_id: Arc<str>,
@@ -115,10 +135,30 @@ fn loaded_entry(
     let model = raw_model
         .as_ref()
         .map(|model| format!("[fx] {model}"));
-    let display_cost = fact.total_cost;
-    let cost = calculate_cost_for_usage(model.as_deref(), usage, display_cost, mode, pricing);
-    let missing_pricing_model =
-        missing_pricing_model_for_usage(model.as_deref(), usage, display_cost, mode, pricing);
+    // fx's own ledger reports $0 for subscription-covered generations. In
+    // auto mode a zero embedded cost falls through to LiteLLM rates so the
+    // report still shows what the tokens would cost; --mode display keeps
+    // fx's number and --mode calculate always prices from scratch.
+    let display_cost = match mode {
+        CostMode::Auto => fact.total_cost.filter(|cost| *cost > 0.0),
+        CostMode::Display | CostMode::Calculate => fact.total_cost,
+    };
+    // Price lookups use the raw model id ("zai/glm-5.2"); only the rendered
+    // label carries the [fx] prefix.
+    let cost = match mode {
+        CostMode::Display => display_cost.unwrap_or(0.0),
+        CostMode::Auto if display_cost.is_some() => {
+            display_cost.expect("checked above")
+        }
+        _ => calculate_cost_from_tokens_raw(raw_model.as_deref(), usage, mode, pricing),
+    };
+    let missing_pricing_model = missing_pricing_model_for_usage(
+        raw_model.as_deref(),
+        usage,
+        display_cost,
+        mode,
+        pricing,
+    );
     let timestamp = crate::TimestampMs::from_millis(fact.created_at_ms as i64);
     let timestamp_text = crate::format_rfc3339_millis(timestamp);
     let data = UsageEntry {

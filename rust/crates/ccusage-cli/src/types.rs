@@ -37,6 +37,9 @@ pub struct SyncArgs {
     pub repo: Option<String>,
     pub machine: Option<String>,
     pub no_push: bool,
+    /// Split report rows per device with its own Machine column; the default
+    /// merges every machine into one row per day and agent.
+    pub by_machine: bool,
 }
 
 #[derive(Clone, Debug, Default)]

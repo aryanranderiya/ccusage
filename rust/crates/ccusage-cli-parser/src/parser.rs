@@ -658,6 +658,7 @@ fn parse_sync_command(
     let mut repo = None;
     let mut machine = None;
     let mut no_push = false;
+    let mut by_machine = false;
     while parser.peek().is_some() {
         if parse_shared_arg_for_command(parser, &mut shared)? {
             continue;
@@ -666,6 +667,7 @@ fn parse_sync_command(
             "--repo" => repo = Some(parser.value_for("--repo")?),
             "--machine" => machine = Some(parser.value_for("--machine")?),
             "--no-push" => no_push = true,
+            "--by-machine" => by_machine = true,
             flag => return Err(format!("Unknown sync option '{flag}'")),
         }
     }
@@ -674,6 +676,7 @@ fn parse_sync_command(
         repo,
         machine,
         no_push,
+        by_machine,
     }))
 }
 

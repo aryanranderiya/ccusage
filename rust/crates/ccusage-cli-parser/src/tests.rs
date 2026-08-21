@@ -213,6 +213,7 @@ fn command_snapshot(command: Option<Command>) -> Value {
             "repo": args.repo,
             "machine": args.machine,
             "noPush": args.no_push,
+            "byMachine": args.by_machine,
         }),
     }
 }

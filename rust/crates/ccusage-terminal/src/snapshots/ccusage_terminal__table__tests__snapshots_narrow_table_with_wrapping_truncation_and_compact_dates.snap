@@ -1,6 +1,5 @@
 ---
 source: crates/ccusage-terminal/src/table.rs
-assertion_line: 453
 expression: "table.render_lines().join(\"\\n\")"
 ---
 ┌──────────┬────────────┬──────────┬──────────┬──────────┐
@@ -11,4 +10,5 @@ expression: "table.render_lines().join(\"\\n\")"
 │ 05-18    │ claude-so… │          │          │          │
 │          │ -          │          │          │          │
 │          │ unusually… │          │          │          │
+├──────────┼────────────┼──────────┼──────────┼──────────┤
 └──────────┴────────────┴──────────┴──────────┴──────────┘

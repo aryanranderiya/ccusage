@@ -469,6 +469,10 @@
     {
       "flags": "--no-push",
       "description": "Merge remote machines into the report without publishing local data"
+    },
+    {
+      "flags": "--by-machine",
+      "description": "Split rows per device in a Machine column instead of merging all machines"
     }
   ]
 }

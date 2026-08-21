@@ -214,8 +214,32 @@ pub(super) fn print_table(
         .with_terminal_width(terminal_width)
         .with_date_compaction(true);
 
+    let mut current_period: Option<String> = None;
     for row in rows {
-        table.push(all_table_row(row, compact, false, shared.no_cost));
+        let values = all_table_row(row, compact, false, shared.no_cost);
+        if current_period.as_deref() != Some(row.period.as_str()) {
+            // A separator above each day block gives the report its rhythm;
+            // rows inside a day flow without lines.
+            if current_period.is_some() {
+                table.separator();
+            }
+            current_period = Some(row.period.clone());
+        }
+        let new_period = true;
+        let mut styled = values;
+        if !compact {
+            if new_period && !styled[0].is_empty() {
+                styled[0] = color(shared, styled[0].clone(), Color::Bold);
+            }
+            if styled[1] == "All" {
+                styled[1] = color(shared, styled[1].clone(), Color::Bold);
+            }
+            if row.total_cost == 0.0 {
+                let index = styled.len() - 1;
+                styled[index] = color(shared, styled[index].clone(), Color::Grey);
+            }
+        }
+        table.push(styled);
         if let Some(agent_breakdowns) = row.agent_breakdowns.as_ref() {
             for breakdown in agent_breakdowns {
                 table.push(all_table_row(breakdown, compact, true, shared.no_cost));

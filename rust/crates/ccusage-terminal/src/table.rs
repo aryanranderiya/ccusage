@@ -76,22 +76,35 @@ impl SimpleTable {
             lines.push(table_line(&header_row, &self.aligns, &widths));
         }
         lines.push(border('├', '┼', '┤', &widths));
-        for (row_index, row) in self.rows.iter().enumerate() {
+        for row in self.rows.iter() {
             match row {
                 Some(row) => {
                     let row = self.compact_date_row(row, &widths);
                     let row = self.shrink_numeric_cells(row, &widths);
-                    for physical_row in expand_multiline_row(&row, self.headers.len(), &widths) {
-                        lines.push(table_line(&physical_row, &self.aligns, &widths));
+                    // Only genuine content wrapping (Models lists and the
+                    // like) boxes a row; single-line rows flow without
+                    // separators so reports stay quiet.
+                    let content_wraps = row
+                        .iter()
+                        .skip(1)
+                        .any(|cell| cell.contains('\n'));
+                    let last_is_border = matches!(lines.last(), Some(line) if {
+                        let trimmed = line.trim_start();
+                        trimmed.starts_with('├') || trimmed.starts_with('┌')
+                    });
+                    let physical =
+                        expand_multiline_row(&row, self.headers.len(), &widths);
+                    if content_wraps && !last_is_border {
+                        lines.push(border('├', '┼', '┤', &widths));
+                    }
+                    for physical_row in &physical {
+                        lines.push(table_line(physical_row, &self.aligns, &widths));
+                    }
+                    if content_wraps {
+                        lines.push(border('├', '┼', '┤', &widths));
                     }
                 }
                 None => lines.push(border('├', '┼', '┤', &widths)),
-            }
-            if row.is_some()
-                && row_index + 1 < self.rows.len()
-                && !matches!(self.rows.get(row_index + 1), Some(None))
-            {
-                lines.push(border('├', '┼', '┤', &widths));
             }
         }
         lines.push(border('└', '┴', '┘', &widths));

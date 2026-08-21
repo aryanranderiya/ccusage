@@ -10,6 +10,9 @@ pub enum Color {
     Grey,
     Red,
     Yellow,
+    /// SGR bold; used for structural emphasis (dates, totals headers) rather
+    /// than another hue, keeping colored output restrained.
+    Bold,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -31,6 +34,7 @@ pub fn color(style: impl Into<TerminalStyle>, value: impl AsRef<str>, color: Col
         Color::Grey => 90,
         Color::Red => 31,
         Color::Yellow => 33,
+        Color::Bold => 1,
     };
     format!("\x1b[{code}m{value}\x1b[0m")
 }
