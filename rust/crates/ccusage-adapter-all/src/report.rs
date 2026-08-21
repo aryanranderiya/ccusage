@@ -241,7 +241,12 @@ pub(super) fn print_table(
         }
         table.push(styled);
         if let Some(agent_breakdowns) = row.agent_breakdowns.as_ref() {
-            for breakdown in agent_breakdowns {
+            for (index, breakdown) in agent_breakdowns.iter().enumerate() {
+                // Without a line between them, adjacent single-line agent rows
+                // read as one merged block; separate each agent after the first.
+                if index > 0 {
+                    table.separator();
+                }
                 table.push(all_table_row(breakdown, compact, true, shared.no_cost));
                 if shared.breakdown && !breakdown.model_breakdowns.is_empty() {
                     push_model_breakdown_rows(

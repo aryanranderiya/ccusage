@@ -67,6 +67,17 @@ impl SimpleTable {
     fn render_lines(&self) -> Vec<String> {
         let widths = self.column_widths();
         let mut lines = Vec::new();
+        // Borders never stack: an explicit separator landing next to a
+        // wrapped-row box (or another separator) collapses into one line.
+        let push_border = |lines: &mut Vec<String>, left: char, middle: char, right: char| {
+            let already_border = matches!(lines.last(), Some(line) if {
+                let trimmed = line.trim_start();
+                trimmed.starts_with('├') || trimmed.starts_with('┌') || trimmed.starts_with('└')
+            });
+            if !already_border {
+                lines.push(border(left, middle, right, &widths));
+            }
+        };
         lines.push(border('┌', '┬', '┐', &widths));
         for header_row in expand_multiline_row(&self.headers, self.headers.len(), &widths) {
             let header_row = header_row
@@ -88,23 +99,19 @@ impl SimpleTable {
                         .iter()
                         .skip(1)
                         .any(|cell| cell.contains('\n'));
-                    let last_is_border = matches!(lines.last(), Some(line) if {
-                        let trimmed = line.trim_start();
-                        trimmed.starts_with('├') || trimmed.starts_with('┌')
-                    });
                     let physical =
                         expand_multiline_row(&row, self.headers.len(), &widths);
-                    if content_wraps && !last_is_border {
-                        lines.push(border('├', '┼', '┤', &widths));
+                    if content_wraps {
+                        push_border(&mut lines, '├', '┼', '┤');
                     }
                     for physical_row in &physical {
                         lines.push(table_line(physical_row, &self.aligns, &widths));
                     }
                     if content_wraps {
-                        lines.push(border('├', '┼', '┤', &widths));
+                        push_border(&mut lines, '├', '┼', '┤');
                     }
                 }
-                None => lines.push(border('├', '┼', '┤', &widths)),
+                None => push_border(&mut lines, '├', '┼', '┤'),
             }
         }
         lines.push(border('└', '┴', '┘', &widths));
