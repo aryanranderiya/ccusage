@@ -126,7 +126,8 @@ pub fn run(args: AgentCommandArgs) -> Result<()> {
     let interactive = !shared.breakdown
         && args.sections.is_none()
         && matches!(kind, AgentReportKind::Daily)
-        && std::io::stdout().is_terminal();
+        && (std::io::stdout().is_terminal()
+            || std::env::var_os("CCUSAGE_FORCE_SUMMARY").is_some());
     if interactive {
         return report::print_summary_view(
             &result.rows,

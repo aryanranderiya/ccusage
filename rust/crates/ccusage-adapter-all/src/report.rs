@@ -644,8 +644,7 @@ fn agent_label(agent: &str) -> &str {
     }
 }
 
-/// Data for one rendered section of the summary view; plain values only, so
-/// layout math never touches ANSI escapes.
+/// One day's worth of summary data.
 pub(super) struct SummaryDay {
     pub label: String,
     pub total_cost: f64,
@@ -667,14 +666,25 @@ pub(super) struct SummaryModel {
     pub cost: f64,
 }
 
+/// One styled run of text in a summary line.
+#[derive(Clone)]
+pub(super) struct SummaryCell {
+    pub text: String,
+    pub color: CellColor,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum CellColor {
+    Plain,
+    Grey,
+    Bold,
+    Green,
+    Blue,
+    CyanBold,
+}
+
 pub(super) struct SummaryGrid {
     pub width: usize,
-    pub money_width: usize,
-    pub tokens_width: usize,
-    pub name_width: usize,
-    pub in_width: usize,
-    pub out_width: usize,
-    pub cache_field: usize,
 }
 
 fn cache_segment(read: u64, creation: u64) -> String {
@@ -696,17 +706,60 @@ fn visible_models(agent: &AllRow) -> impl Iterator<Item = &crate::ModelBreakdown
     })
 }
 
-/// Renders the summary body. Column order on every data line:
-/// ... cached(3sp) TOKENS(1sp) PRICE — price flush at the right rail.
-fn summary_body_lines(days: &[SummaryDay], width: usize) -> (Vec<String>, SummaryGrid) {
+fn day_total_tokens(day: &SummaryDay) -> u64 {
+    day.agents
+        .iter()
+        .flat_map(|agent| &agent.models)
+        .map(|m| m.input + m.output + m.cache_read + m.cache_write)
+        .sum()
+}
+
+fn day_all_tokens(days: &[SummaryDay]) -> u64 {
+    days.iter().map(|day| day_total_tokens(day)).sum()
+}
+
+type SummaryLine = Option<Vec<SummaryCell>>;
+
+/// Cell-aware composer: `left`/`right` are fixed colored cell groups, the
+/// middle is produced by `make_mid` at whatever width remains (never below
+/// `min_mid`; longer content truncates). Concatenation is exactly `width`.
+fn compose_row_cells(
+    left: &[SummaryCell],
+    right: &[SummaryCell],
+    min_mid: usize,
+    width: usize,
+    make_mid: impl Fn(usize) -> Vec<SummaryCell>,
+) -> Vec<SummaryCell> {
+    fn visible(cells: &[SummaryCell]) -> usize {
+        cells.iter().map(|cell| cell.text.chars().count()).sum()
+    }
+    let left_w = visible(left);
+    let right_w = visible(right);
+    let gaps = 2usize; // one space on each side of the middle
+    let mid_width =
+        width.saturating_sub(left_w + right_w + gaps).max(min_mid.min(width));
+    let mut out = left.to_vec();
+    out.push(SummaryCell { text: " ".to_string(), color: CellColor::Plain });
+    out.extend(make_mid(mid_width));
+    out.push(SummaryCell { text: " ".to_string(), color: CellColor::Plain });
+    out.extend(right.to_vec());
+    out
+}
+
+
+/// Renders the summary body as styled cell rows (None = blank separator
+/// line). Column widths are measured from PLAIN text first, then colors are
+/// attached to fixed-width padded cells, so rails align identically on
+/// every row regardless of terminal color support.
+fn summary_body_lines(
+    days: &[SummaryDay],
+    width: usize,
+) -> (Vec<SummaryLine>, SummaryGrid) {
     let all_models: Vec<&SummaryModel> = days
         .iter()
         .flat_map(|day| day.agents.iter())
         .flat_map(|agent| agent.models.iter())
         .collect();
-    let tokens_of = |agent: &SummaryAgent| -> u64 {
-        agent.models.iter().map(|m| m.input + m.output + m.cache_read + m.cache_write).sum()
-    };
 
     let name_width = all_models
         .iter()
@@ -716,17 +769,16 @@ fn summary_body_lines(days: &[SummaryDay], width: usize) -> (Vec<String>, Summar
         .clamp(6, 28);
     let in_width = all_models
         .iter()
-        .map(|model| format!("↑{}", short_tokens(model.input)).len())
+        .map(|model| format!("in {}", short_tokens(model.input)).len())
         .max()
         .unwrap_or(4)
-        .clamp(4, 9);
+        .clamp(4, 10);
     let out_width = all_models
         .iter()
-        .map(|model| format!("↓{}", short_tokens(model.output)).len())
+        .map(|model| format!("out {}", short_tokens(model.output)).len())
         .max()
         .unwrap_or(4)
-        .clamp(4, 9);
-
+        .clamp(4, 11);
     let money_width = all_models
         .iter()
         .map(|model| format_currency(model.cost).len())
@@ -742,6 +794,9 @@ fn summary_body_lines(days: &[SummaryDay], width: usize) -> (Vec<String>, Summar
         .max()
         .unwrap_or(8)
         .clamp(8, 13);
+    let tokens_of = |agent: &SummaryAgent| -> u64 {
+        agent.models.iter().map(|m| m.input + m.output + m.cache_read + m.cache_write).sum::<u64>()
+    };
     let tokens_width = all_models
         .iter()
         .map(|model| {
@@ -750,135 +805,164 @@ fn summary_body_lines(days: &[SummaryDay], width: usize) -> (Vec<String>, Summar
         .chain(
             days.iter()
                 .flat_map(|day| day.agents.iter())
-                .map(|agent| {
-                    let total: u64 =
-                        agent.models.iter().map(|m| m.input + m.output + m.cache_read + m.cache_write).sum();
-                    short_tokens(total).len()
-                }),
+                .map(|agent| short_tokens(tokens_of(agent)).len()),
         )
-        .chain(days.iter().map(|day| {
-            let total: u64 = day
-                .agents
-                .iter()
-                .map(|a| a.models.iter().map(|m| m.input + m.output + m.cache_read + m.cache_write).sum::<u64>())
-                .sum();
-            short_tokens(total).len()
-        }))
-        .chain(std::iter::once(
-            short_tokens(
-                all_models
-                    .iter()
-                    .map(|m| m.input + m.output + m.cache_read + m.cache_write)
-                    .sum(),
-            )
-            .len(),
-        ))
+        .chain(days.iter().map(|day| short_tokens(day_total_tokens(day)).len()))
+        .chain(std::iter::once(short_tokens(day_all_tokens(days)).len()))
         .max()
         .unwrap_or(6)
         .clamp(6, 10);
 
-    // Model line: indent6 + name + sp + in + sp + out + sp + CACHE + 3sp +
-    // TOKENS + sp + MONEY == width exactly.
-    let cache_field = width.saturating_sub(
-        6 + name_width + in_width + out_width + money_width + tokens_width + 7,
-    );
 
-    let mut lines = Vec::new();
+    // Cell constructors — pad from plain widths, attach color last.
+    let cell = |text: String, color: CellColor| SummaryCell { text, color };
+    let grey = |text: String| cell(text, CellColor::Grey);
+    let bold = |text: String| cell(text, CellColor::Bold);
+    let green_cell = |c: SummaryCell| SummaryCell { color: CellColor::Green, ..c };
+    let cyan_date = |text: String| cell(text, CellColor::CyanBold);
+    let pad_left = |text: String, w: usize, color: CellColor| {
+        let padding = w.saturating_sub(text.chars().count());
+        cell(format!("{}{}", " ".repeat(padding), text), color)
+    };
+
+    let mut lines: Vec<SummaryLine> = Vec::new();
     for (index, day) in days.iter().enumerate() {
         if index > 0 {
-            lines.push(String::new());
+            lines.push(None);
         }
+        // Day header: cyan date, thin rule, blue totals on the rails.
         let label = format!(" {}", day.label);
-        let day_total: u64 = day
-            .agents
-            .iter()
-            .flat_map(|a| &a.models)
-            .map(|m| m.input + m.output + m.cache_read + m.cache_write)
-            .sum();
-        let fill = width
-            .saturating_sub(label.len() + 1 + 3 + tokens_width + 1 + money_width)
-            .max(3);
-        lines.push(format!(
-            "{label} {}   {:>tw$} {:>mw$}",
-            "─".repeat(fill),
-            short_tokens(day_total),
-            format_currency(day.total_cost),
-            tw = tokens_width,
-            mw = money_width,
-        ));
-        // Empty line below the date separates the section header from its
-        // first agent row.
-        lines.push(String::new());
+        let right = vec![
+            pad_left(
+                short_tokens(day_total_tokens(day)),
+                tokens_width,
+                CellColor::Blue,
+            ),
+            cell(" ".to_string(), CellColor::Plain),
+            green_cell(pad_left(
+                format_currency(day.total_cost),
+                money_width,
+                CellColor::Green,
+            )),
+        ];
+        lines.push(Some(compose_row_cells(
+            &[cyan_date(label)],
+            &right,
+            3,
+            width,
+            |mid_width| vec![grey("─".repeat(mid_width))],
+        )));
+        // Blank under the date separates header from agents.
+        lines.push(None);
 
         for (agent_index, agent) in day.agents.iter().enumerate() {
             if agent_index > 0 {
-                lines.push(String::new());
+                lines.push(None);
             }
-            let leader = width
-                .saturating_sub(
-                    3 + agent.name.len() + 3 + tokens_width + 1 + money_width,
-                )
-                .max(3);
-            lines.push(format!(
-                "   {}{}   {:>tw$} {:>mw$}",
-                agent.name,
-                "·".repeat(leader),
-                short_tokens(tokens_of(agent)),
-                format_currency(agent.total_cost),
-                tw = tokens_width,
-                mw = money_width,
-            ));
+            let right = vec![
+                pad_left(short_tokens(tokens_of(agent)), tokens_width, CellColor::Blue),
+                cell(" ".to_string(), CellColor::Plain),
+                green_cell(pad_left(
+                    format_currency(agent.total_cost),
+                    money_width,
+                    CellColor::Green,
+                )),
+            ];
+            lines.push(Some(compose_row_cells(
+                &[bold(format!("   {}", agent.name))],
+                &right,
+                3,
+                width,
+                |mid_width| vec![grey(".".repeat(mid_width))],
+            )));
             for model in &agent.models {
+                let left = vec![
+                    cell(
+                        format!(
+                            "      {:<nw$} {:>iw$} {:>ow$}",
+                            model.name,
+                            format!("in {}", short_tokens(model.input)),
+                            format!("out {}", short_tokens(model.output)),
+                            nw = name_width,
+                            iw = in_width,
+                            ow = out_width,
+                        ),
+                        CellColor::Plain,
+                    ),
+                ];
+                let right = vec![
+                    pad_left(
+                        short_tokens(
+                            model.input + model.output + model.cache_read + model.cache_write
+                        ),
+                        tokens_width,
+                        CellColor::Blue,
+                    ),
+                    cell(" ".to_string(), CellColor::Plain),
+                    green_cell(pad_left(
+                        format_currency(model.cost),
+                        money_width,
+                        CellColor::Green,
+                    )),
+                ];
                 let cache_text = cache_segment(model.cache_read, model.cache_write);
-                let cache_pad = cache_field.saturating_sub(cache_text.len());
-                let model_tokens = short_tokens(
-                    model.input + model.output + model.cache_read + model.cache_write,
-                );
-                lines.push(format!(
-                    "      {:<nw$} {:>iw$} {:>ow$} {}{}   {:>tw$} {:>mw$}",
-                    model.name,
-                    format!("↑{}", short_tokens(model.input)),
-                    format!("↓{}", short_tokens(model.output)),
-                    " ".repeat(cache_pad),
-                    cache_text,
-                    model_tokens,
-                    format_currency(model.cost),
-                    nw = name_width,
-                    iw = in_width,
-                    ow = out_width,
-                    tw = tokens_width,
-                    mw = money_width,
-                ));
+                lines.push(Some(compose_row_cells(
+                    &left,
+                    &right,
+                    0,
+                    width,
+                    |mid_width| {
+                        // Cache fills the middle minus a fixed 3-space gap
+                        // before the tokens rail; truncates when narrow.
+                        let cell_width = mid_width.saturating_sub(3);
+                        if cell_width == 0 {
+                            // No room for cache text; keep only the gap.
+                            return vec![
+                                grey(String::new()),
+                                SummaryCell { text: "   ".to_string(), color: CellColor::Plain },
+                            ];
+                        }
+                        let mut text = cache_text.clone();
+                        if text.chars().count() > cell_width {
+                            let keep = cell_width - 1;
+                            text = format!("~{}", &text[text.len() - keep..]);
+                        }
+                        let pad = cell_width - text.chars().count();
+                        vec![
+                            grey(" ".repeat(pad)),
+                            grey(text),
+                            SummaryCell {
+                                text: "   ".to_string(),
+                                color: CellColor::Plain,
+                            },
+                        ]
+                    },
+                )));
             }
         }
     }
 
-    let grand = format_currency(days.iter().map(|day| day.total_cost).sum());
-    let grand_tokens = short_tokens(
-        all_models.iter().map(|m| m.input + m.output + m.cache_read + m.cache_write).sum(),
-    );
+    // Grand total footer.
     let meta = format!("{} days", days.len());
-    let used = 2 + "TOTAL".len() + 3 + meta.len() + 3 + tokens_width + 1 + money_width;
-    let fill = width.saturating_sub(used).max(3);
-    lines.push(String::new());
-    lines.push(format!(
-        "  TOTAL{} {}   {:>tw$} {:>mw$}",
-        format!("  {meta}"),
-        "─".repeat(fill),
-        grand_tokens,
-        grand,
-        tw = tokens_width,
-        mw = money_width,
-    ));
-    let grid = SummaryGrid {
+    let right = vec![
+        pad_left(short_tokens(day_all_tokens(days)), tokens_width, CellColor::Blue),
+        cell(" ".to_string(), CellColor::Plain),
+        green_cell(pad_left(
+            format_currency(days.iter().map(|d| d.total_cost).sum()),
+            money_width,
+            CellColor::Green,
+        )),
+    ];
+    lines.push(None);
+    lines.push(Some(compose_row_cells(
+        &[bold(format!("  TOTAL  {meta}"))],
+        &right,
+        3,
         width,
-        money_width,
-        tokens_width,
-        name_width,
-        in_width,
-        out_width,
-        cache_field,
-    };
+        |mid_width| vec![grey("─".repeat(mid_width))],
+    )));
+
+    let grid = SummaryGrid { width };
     (lines, grid)
 }
 
@@ -889,6 +973,7 @@ pub(super) fn print_summary_view(
     shared: &SharedArgs,
     detected_agents: &[&'static str],
 ) -> Result<()> {
+    use crate::color;
     println!();
     print_box_title(&all_report_title(kind, rows, detected_agents), shared);
     if rows.is_empty() {
@@ -922,77 +1007,25 @@ pub(super) fn print_summary_view(
         .collect();
 
     let width = (crate::terminal_width().max(72) as usize).min(124);
-    let dim = |value: String| color(shared, value, Color::Grey);
-    let bold = |value: String| color(shared, value, Color::Bold);
-    let green = |value: String| color(shared, value, Color::Green);
-    let blue = |value: String| color(shared, value, Color::Blue);
+    let (lines, _grid) = summary_body_lines(&days, width);
 
-    let (lines, grid) = summary_body_lines(&days, width);
+    let paint = |cell: &SummaryCell| match cell.color {
+        CellColor::Plain => cell.text.clone(),
+        CellColor::Grey => color(shared, cell.text.clone(), crate::Color::Grey),
+        CellColor::Bold => color(shared, cell.text.clone(), crate::Color::Bold),
+        CellColor::Green => color(shared, cell.text.clone(), crate::Color::Green),
+        CellColor::Blue => color(shared, cell.text.clone(), crate::Color::Blue),
+        CellColor::CyanBold => color(shared, cell.text.clone(), crate::Color::CyanBold),
+    };
+
     for line in lines {
-        if line.is_empty() {
-            println!();
-            continue;
-        }
-        debug_assert_eq!(line.chars().count(), grid.width, "summary line off grid");
-
-        // Rail cells sit at fixed offsets from the end. Coloring wraps the
-        // existing slices verbatim; no separator is ever injected, so the
-        // layout grid survives styling byte-for-byte.
-        let chars: Vec<char> = line.chars().collect();
-        let money_start = grid.width - grid.money_width;
-        let tokens_start = money_start - 1 - grid.tokens_width;
-        let head: String = chars[..tokens_start].iter().collect();
-        let tokens_cell: String = chars[tokens_start..money_start].iter().collect();
-        let money_cell: String = chars[money_start..].iter().collect();
-
-        if line.contains('↑') {
-            // Model row: dim cache cell, price green, tokens stay plain.
-            let cs = 6 + grid.name_width + 1 + grid.in_width + 1 + grid.out_width + 1;
-            let ce = (cs + grid.cache_field).min(tokens_start);
-            let prefix: String = chars[..cs].iter().collect();
-            let cache: String = chars[cs..ce].iter().collect();
-            let gap: String = chars[ce..tokens_start].iter().collect();
-            println!("{prefix}{}{gap}{} {}", dim(cache), tokens_cell, green(money_cell));
-        } else if line.trim_start().starts_with("TOTAL") {
-            // TOTAL: label bold, meta/rule dim, tokens blue, price green.
-            let total_idx = head.find("TOTAL").expect("TOTAL present");
-            let before: String = head.chars().take(total_idx).collect();
-            let label: String =
-                head.chars().skip(total_idx).take(5).collect();
-            let after: String = head.chars().skip(total_idx + 5).collect();
-            println!(
-                "{}{}{} {} {}",
-                dim(before),
-                bold(label),
-                dim(after),
-                blue(tokens_cell),
-                green(money_cell)
-            );
-        } else if line.contains('·') {
-            // Agent subtotal: name bold, dotted leader dim, tokens blue,
-            // price green.
-            let dot_idx = head.find('·').expect("leader present");
-            let name: String = head.chars().take(dot_idx).collect();
-            let dots: String = head.chars().skip(dot_idx).collect();
-            println!(
-                "{}{} {} {}",
-                bold(name),
-                dim(dots),
-                blue(tokens_cell),
-                green(money_cell)
-            );
-        } else {
-            // Day header: bold-cyan date, dim rule, tokens and price blue.
-            let rule_idx = head.find('─').unwrap_or(head.len());
-            let date: String = head.chars().take(rule_idx).collect();
-            let rule: String = head.chars().skip(rule_idx).collect();
-            println!(
-                "{} {} {} {}",
-                color(shared, date, Color::CyanBold),
-                dim(rule),
-                blue(tokens_cell),
-                blue(money_cell)
-            );
+        match line {
+            Some(cells) => {
+                let rendered: String =
+                    cells.iter().map(|cell| paint(cell)).collect();
+                println!("{rendered}");
+            }
+            None => println!(),
         }
     }
     Ok(())
@@ -1036,6 +1069,22 @@ fn short_tokens(tokens: u64) -> String {
 #[cfg(test)]
 mod summary_tests {
     use super::*;
+
+    fn plain_lines(days: &[SummaryDay], width: usize) -> (Vec<String>, usize) {
+        let (rows, grid) = summary_body_lines(days, width);
+        let lines = rows
+            .iter()
+            .map(|row| {
+                row.as_ref()
+                    .map(|cells| {
+                        cells.iter().map(|c| c.text.clone()).collect::<String>()
+                    })
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>();
+        (lines, grid.width)
+    }
+
 
     fn sample_days() -> Vec<SummaryDay> {
         vec![
@@ -1114,31 +1163,57 @@ mod summary_tests {
 
     /// Character column of the first occurrence of `needle`, the way a
     /// terminal counts columns (multi-byte glyphs occupy one cell).
-    fn col_of(line: &str, needle: char) -> usize {
-        line.chars().position(|ch| ch == needle).expect("needle present")
-    }
 
     #[test]
-    fn probe_widths() {
+    fn grid_holds_across_widths() {
         let days = sample_days();
-        for width in [72usize, 80, 90, 100, 110, 124] {
-            let (lines, grid) = summary_body_lines(&days, width);
-            let mut kinds = Vec::new();
-            for line in &lines {
-                if line.is_empty() { continue; }
-                let kind = if line.contains('↑') { "model" }
-                    else if line.contains('·') { "agent" }
-                    else if line.trim_start().starts_with("TOTAL") { "total" }
-                    else { "header" };
-                kinds.push((kind, line.chars().count()));
+        for width in [72usize, 84, 96, 104, 116, 124] {
+            let (lines, expected_width) = plain_lines(&days, width);
+            let grid_width = expected_width;
+            let bad: Vec<usize> = lines
+                .iter()
+                .filter(|line| !line.is_empty())
+                .map(|line| line.chars().count())
+                .filter(|len| *len != grid_width)
+                .collect();
+            if !bad.is_empty() {
+                for line in lines.iter() {
+                    if line.is_empty() { continue; }
+                    let n = line.chars().count();
+                    if n != grid_width {
+                        let kind = if line.contains(" out ") { "model" }
+                            else if line.contains("TOTAL") { "total" }
+                            else if line.contains('\u{2500}') { "header" }
+                            else { "agent" };
+                        println!("DBG width={width} {kind} len={n} expected={} |{}|", grid_width, line);
+                    }
+                }
             }
-            println!("width={width} grid_cf={} {:?}", grid.cache_field, kinds);
+            if !bad.is_empty() {
+                for line in &lines {
+                    println!("DBGW len={:>2} |{}|", line.chars().count(), line);
+                }
+            }
+            assert!(
+                bad.is_empty(),
+                "width {width}: lines off grid by {:?}",
+                bad.iter().map(|len| *len as isize - grid_width as isize).collect::<Vec<_>>()
+            );
+            let _ = &lines;
         }
     }
 
     #[test]
     fn money_sits_flush_on_the_rail() {
-        let (lines, _grid) = summary_body_lines(&sample_days(), 104);
+        let (raw, _w) = summary_body_lines(&sample_days(), 104);
+        let lines: Vec<String> = raw
+            .iter()
+            .map(|row| {
+                row.as_ref()
+                    .map(|cells| cells.iter().map(|c| c.text.clone()).collect::<String>())
+                    .unwrap_or_default()
+            })
+            .collect();
         let money_lines: Vec<&String> =
             lines.iter().filter(|line| line.contains('$')).collect();
         assert!(money_lines.len() >= 9);
@@ -1156,15 +1231,31 @@ mod summary_tests {
 
     #[test]
     fn token_columns_align_across_all_model_rows() {
-        let (lines, _grid) = summary_body_lines(&sample_days(), 104);
+        let (raw, _w) = summary_body_lines(&sample_days(), 104);
+        let lines: Vec<String> = raw
+            .iter()
+            .map(|row| {
+                row.as_ref()
+                    .map(|cells| cells.iter().map(|c| c.text.clone()).collect::<String>())
+                    .unwrap_or_default()
+            })
+            .collect();
         let model_rows: Vec<&String> = lines
             .iter()
-            .filter(|line| line.contains('↑') && line.contains('↓'))
+            .filter(|line| line.contains(" out "))
             .collect();
         assert!(model_rows.len() >= 4, "expected model rows");
-        let out_cols: Vec<usize> =
-            model_rows.iter().map(|line| col_of(line, '↓')).collect();
-        assert!(out_cols.iter().all(|col| *col == out_cols[0]), "↓ cols: {out_cols:?}");
+        let out_cols: Vec<usize> = model_rows
+            .iter()
+            .map(|line| {
+                line.chars()
+                    .collect::<Vec<char>>()
+                    .windows(4)
+                    .position(|w| w == ['o', 'u', 't', ' '])
+                    .expect("out present")
+            })
+            .collect();
+        assert!(out_cols.iter().all(|col| *col == out_cols[0]), "out cols: {out_cols:?}");
         // Cache values must keep their magnitude suffix (guards an old
         // off-by-one that chopped the trailing character).
         for line in &model_rows {
