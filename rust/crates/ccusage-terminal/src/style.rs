@@ -6,6 +6,7 @@ use std::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Color {
     Blue,
+    Cyan,
     Green,
     Grey,
     Red,
@@ -35,6 +36,7 @@ pub fn color(style: impl Into<TerminalStyle>, value: impl AsRef<str>, color: Col
         Color::Red => 31,
         Color::Yellow => 33,
         Color::Bold => 1,
+        Color::Cyan => 36,
     };
     format!("\x1b[{code}m{value}\x1b[0m")
 }

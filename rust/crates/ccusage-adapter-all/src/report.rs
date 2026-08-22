@@ -716,12 +716,35 @@ fn summary_body_lines(days: &[SummaryDay], width: usize) -> Vec<String> {
         .unwrap_or(8)
         .clamp(8, 13);
 
+    // Tokens rail: per-line totals sit right of the money column.
+    let tokens_of = |agent: &SummaryAgent| -> u64 {
+        agent.models.iter().map(|m| m.input + m.output + m.cache_read + m.cache_write).sum()
+    };
+    let tokens_width = all_models
+        .iter()
+        .map(|model| {
+            short_tokens(model.input + model.output + model.cache_read + model.cache_write).len()
+        })
+        .chain(
+            days.iter()
+                .flat_map(|day| day.agents.iter())
+                .map(|agent| short_tokens(tokens_of(agent)).len()),
+        )
+        .chain(days.iter().map(|day| {
+            let total: u64 = day.agents.iter().map(|a| tokens_of(a)).sum();
+            short_tokens(total).len()
+        }))
+        .max()
+        .unwrap_or(6)
+        .clamp(6, 10);
+
     // Model line: 6(indent) + name + 1 + in + 1 + out + 1 + CACHE_FIELD + 1
     // + money must equal `width` exactly, which sizes the cache field so the
     // money rail lands on the same column as every other row.
     // Gaps: indent(6) + name + sp + in + sp + out + sp + cache + sp + money.
-    let cache_field =
-        width.saturating_sub(10 + name_width + in_width + out_width + money_width);
+    let cache_field = width.saturating_sub(
+        11 + name_width + in_width + out_width + money_width + tokens_width,
+    );
 
     let mut lines = Vec::new();
     for (index, day) in days.iter().enumerate() {
@@ -730,43 +753,57 @@ fn summary_body_lines(days: &[SummaryDay], width: usize) -> Vec<String> {
         }
         // Day header: date left, thin rule, cost on the rail.
         let label = format!(" {}", day.label);
-        let fill = width.saturating_sub(label.len() + 1 + money_width).max(3);
+        let day_tokens: u64 = day.agents.iter().map(|a| tokens_of(a)).sum();
+        let fill = width
+            .saturating_sub(label.len() + 1 + money_width + 1 + tokens_width)
+            .max(3);
         lines.push(format!(
-            "{label}{} {:>mw$}",
+            "{label}{} {:>mw$} {:>tw$}",
             "─".repeat(fill),
             format_currency(day.total_cost),
-            mw = money_width
+            short_tokens(day_tokens),
+            mw = money_width,
+            tw = tokens_width,
         ));
+        // Air under the date keeps the section header visually separate from
+        // its first agent row.
+        lines.push(String::new());
 
         for (agent_index, agent) in day.agents.iter().enumerate() {
             if agent_index > 0 {
                 lines.push(String::new());
             }
             let leader = width
-                .saturating_sub(3 + agent.name.len() + 1 + money_width)
+                .saturating_sub(3 + agent.name.len() + 1 + money_width + 1 + tokens_width)
                 .max(3);
             lines.push(format!(
-                "   {}{} {:>mw$}",
+                "   {}{} {:>mw$} {:>tw$}",
                 agent.name,
                 "·".repeat(leader),
                 format_currency(agent.total_cost),
-                mw = money_width
+                short_tokens(tokens_of(agent)),
+                mw = money_width,
+                tw = tokens_width,
             ));
             for model in &agent.models {
                 let cache_text = cache_segment(model.cache_read, model.cache_write);
                 let cache_pad = cache_field.saturating_sub(cache_text.len());
+                let model_tokens =
+                    short_tokens(model.input + model.output + model.cache_read + model.cache_write);
                 lines.push(format!(
-                    "      {:<nw$} {:>iw$} {:>ow$} {}{} {:>mw$}",
+                    "      {:<nw$} {:>iw$} {:>ow$} {}{} {:>mw$} {:>tw$}",
                     model.name,
                     format!("↑{}", short_tokens(model.input)),
                     format!("↓{}", short_tokens(model.output)),
                     " ".repeat(cache_pad),
                     cache_text,
                     format_currency(model.cost),
+                    model_tokens,
                     nw = name_width,
                     iw = in_width,
                     ow = out_width,
                     mw = money_width,
+                    tw = tokens_width,
                 ));
             }
         }
@@ -774,20 +811,21 @@ fn summary_body_lines(days: &[SummaryDay], width: usize) -> Vec<String> {
 
     // Grand total on the same rail.
     let grand = format_currency(days.iter().map(|day| day.total_cost).sum());
-    let meta = format!(
-        "{} days · {} tokens",
-        days.len(),
-        short_tokens(all_models.iter().map(|m| m.input + m.output + m.cache_read + m.cache_write).sum())
+    let meta = format!("{} days", days.len());
+    let grand_tokens = short_tokens(
+        all_models.iter().map(|m| m.input + m.output + m.cache_read + m.cache_write).sum(),
     );
-    let used = 2 + "TOTAL".len() + 3 + meta.len() + money_width;
+    let used = 2 + "TOTAL".len() + 3 + meta.len() + money_width + 2 + tokens_width;
     let fill = width.saturating_sub(used).max(3);
     lines.push(String::new());
     lines.push(format!(
-        "  TOTAL{} {} {:>mw$}",
+        "  TOTAL{} {} {:>mw$} {:>tw$}",
         format!("  {meta}"),
         "─".repeat(fill),
         grand,
-        mw = money_width
+        grand_tokens,
+        mw = money_width,
+        tw = tokens_width,
     ));
     lines
 }
@@ -837,11 +875,22 @@ pub(super) fn print_summary_view(
     let bold = |value: String| color(shared, value, Color::Bold);
 
     for line in summary_body_lines(&days, width) {
-        // Style the two structural elements; the body keeps its own subtle
-        // markers by wrapping known prefixes.
-        if line.starts_with(' ') && line.contains('─') && !line.contains("↑") && !line.contains("TOTAL") {
-            println!("{}", dim(line));
-        } else if line.trim_start().starts_with("TOTAL") || line.contains("──") && !line.contains("↑") {
+        // Day headers get the full treatment: cyan date, dim rule, bold cost.
+        if line.starts_with(' ')
+            && line.contains('─')
+            && !line.contains('↓')
+            && !line.contains("TOTAL")
+        {
+            let rule_start = line.find('─').expect("rule present");
+            let (label, rest) = line.split_at(rule_start);
+            let (rule, money) = rest.split_at(rest.find(char::is_whitespace).unwrap_or(0));
+            println!(
+                "{} {} {}",
+                color(shared, label, Color::Cyan),
+                dim(rule.to_string()),
+                bold(money.to_string())
+            );
+        } else if line.trim_start().starts_with("TOTAL") && line.contains('─') {
             println!("{}", bold(line));
         } else {
             println!("{line}");
