@@ -7,6 +7,7 @@ use std::{
 pub enum Color {
     Blue,
     Cyan,
+    CyanBold,
     Green,
     Grey,
     Red,
@@ -29,14 +30,16 @@ pub fn color(style: impl Into<TerminalStyle>, value: impl AsRef<str>, color: Col
     if !use_color(&style) {
         return value.to_string();
     }
-    let code = match color {
-        Color::Blue => 34,
-        Color::Green => 32,
-        Color::Grey => 90,
-        Color::Red => 31,
-        Color::Yellow => 33,
-        Color::Bold => 1,
-        Color::Cyan => 36,
+    let code: &str = match color {
+        Color::Blue => "34",
+        Color::Green => "32",
+        Color::Grey => "90",
+        Color::Red => "31",
+        Color::Yellow => "33",
+        Color::Bold => "1",
+        Color::Cyan => "36",
+        // Bold cyan composite for section dates.
+        Color::CyanBold => "1;36",
     };
     format!("\x1b[{code}m{value}\x1b[0m")
 }

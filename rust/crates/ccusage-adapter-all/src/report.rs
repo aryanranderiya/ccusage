@@ -667,18 +667,46 @@ pub(super) struct SummaryModel {
     pub cost: f64,
 }
 
-/// Renders the summary body into plain-text lines. All columns derive from
-/// one shared grid: money right-aligns to a single rail, tokens to their own
-/// rails, and nothing else may push them around. Pure function -> testable.
-fn summary_body_lines(days: &[SummaryDay], width: usize) -> Vec<String> {
-    const MAX_WIDTH: usize = 104;
-    let width = width.min(MAX_WIDTH).max(72);
+pub(super) struct SummaryGrid {
+    pub width: usize,
+    pub money_width: usize,
+    pub tokens_width: usize,
+    pub name_width: usize,
+    pub in_width: usize,
+    pub out_width: usize,
+    pub cache_field: usize,
+}
 
+fn cache_segment(read: u64, creation: u64) -> String {
+    if creation > 0 {
+        format!("cached +{} / {}", short_tokens(creation), short_tokens(read))
+    } else {
+        format!("cached {}", short_tokens(read))
+    }
+}
+
+fn agent_breakdowns(row: &AllRow) -> &[AllRow] {
+    row.agent_breakdowns.as_deref().unwrap_or(&[])
+}
+
+fn visible_models(agent: &AllRow) -> impl Iterator<Item = &crate::ModelBreakdown> {
+    agent.model_breakdowns.iter().filter(|model| {
+        model.input_tokens + model.output_tokens + model.cache_read_tokens
+            + model.cache_creation_tokens > 0
+    })
+}
+
+/// Renders the summary body. Column order on every data line:
+/// ... cached(3sp) TOKENS(1sp) PRICE — price flush at the right rail.
+fn summary_body_lines(days: &[SummaryDay], width: usize) -> (Vec<String>, SummaryGrid) {
     let all_models: Vec<&SummaryModel> = days
         .iter()
         .flat_map(|day| day.agents.iter())
         .flat_map(|agent| agent.models.iter())
         .collect();
+    let tokens_of = |agent: &SummaryAgent| -> u64 {
+        agent.models.iter().map(|m| m.input + m.output + m.cache_read + m.cache_write).sum()
+    };
 
     let name_width = all_models
         .iter()
@@ -699,7 +727,6 @@ fn summary_body_lines(days: &[SummaryDay], width: usize) -> Vec<String> {
         .unwrap_or(4)
         .clamp(4, 9);
 
-    // One money rail: widest dollar figure anywhere sets the column.
     let money_width = all_models
         .iter()
         .map(|model| format_currency(model.cost).len())
@@ -715,11 +742,6 @@ fn summary_body_lines(days: &[SummaryDay], width: usize) -> Vec<String> {
         .max()
         .unwrap_or(8)
         .clamp(8, 13);
-
-    // Tokens rail: per-line totals sit right of the money column.
-    let tokens_of = |agent: &SummaryAgent| -> u64 {
-        agent.models.iter().map(|m| m.input + m.output + m.cache_read + m.cache_write).sum()
-    };
     let tokens_width = all_models
         .iter()
         .map(|model| {
@@ -728,22 +750,37 @@ fn summary_body_lines(days: &[SummaryDay], width: usize) -> Vec<String> {
         .chain(
             days.iter()
                 .flat_map(|day| day.agents.iter())
-                .map(|agent| short_tokens(tokens_of(agent)).len()),
+                .map(|agent| {
+                    let total: u64 =
+                        agent.models.iter().map(|m| m.input + m.output + m.cache_read + m.cache_write).sum();
+                    short_tokens(total).len()
+                }),
         )
         .chain(days.iter().map(|day| {
-            let total: u64 = day.agents.iter().map(|a| tokens_of(a)).sum();
+            let total: u64 = day
+                .agents
+                .iter()
+                .map(|a| a.models.iter().map(|m| m.input + m.output + m.cache_read + m.cache_write).sum::<u64>())
+                .sum();
             short_tokens(total).len()
         }))
+        .chain(std::iter::once(
+            short_tokens(
+                all_models
+                    .iter()
+                    .map(|m| m.input + m.output + m.cache_read + m.cache_write)
+                    .sum(),
+            )
+            .len(),
+        ))
         .max()
         .unwrap_or(6)
         .clamp(6, 10);
 
-    // Model line: 6(indent) + name + 1 + in + 1 + out + 1 + CACHE_FIELD + 1
-    // + money must equal `width` exactly, which sizes the cache field so the
-    // money rail lands on the same column as every other row.
-    // Gaps: indent(6) + name + sp + in + sp + out + sp + cache + sp + money.
+    // Model line: indent6 + name + sp + in + sp + out + sp + CACHE + 3sp +
+    // TOKENS + sp + MONEY == width exactly.
     let cache_field = width.saturating_sub(
-        11 + name_width + in_width + out_width + money_width + tokens_width,
+        6 + name_width + in_width + out_width + money_width + tokens_width + 7,
     );
 
     let mut lines = Vec::new();
@@ -751,83 +788,95 @@ fn summary_body_lines(days: &[SummaryDay], width: usize) -> Vec<String> {
         if index > 0 {
             lines.push(String::new());
         }
-        // Day header: date left, thin rule, cost on the rail.
         let label = format!(" {}", day.label);
-        let day_tokens: u64 = day.agents.iter().map(|a| tokens_of(a)).sum();
+        let day_total: u64 = day
+            .agents
+            .iter()
+            .flat_map(|a| &a.models)
+            .map(|m| m.input + m.output + m.cache_read + m.cache_write)
+            .sum();
         let fill = width
-            .saturating_sub(label.len() + 1 + money_width + 1 + tokens_width)
+            .saturating_sub(label.len() + 1 + 3 + tokens_width + 1 + money_width)
             .max(3);
         lines.push(format!(
-            "{label}{} {:>mw$} {:>tw$}",
+            "{label} {}   {:>tw$} {:>mw$}",
             "─".repeat(fill),
+            short_tokens(day_total),
             format_currency(day.total_cost),
-            short_tokens(day_tokens),
-            mw = money_width,
             tw = tokens_width,
+            mw = money_width,
         ));
-        // Air under the date keeps the section header visually separate from
-        // its first agent row.
-        lines.push(String::new());
 
         for (agent_index, agent) in day.agents.iter().enumerate() {
             if agent_index > 0 {
                 lines.push(String::new());
             }
             let leader = width
-                .saturating_sub(3 + agent.name.len() + 1 + money_width + 1 + tokens_width)
+                .saturating_sub(
+                    3 + agent.name.len() + 3 + tokens_width + 1 + money_width,
+                )
                 .max(3);
             lines.push(format!(
-                "   {}{} {:>mw$} {:>tw$}",
+                "   {}{}   {:>tw$} {:>mw$}",
                 agent.name,
                 "·".repeat(leader),
-                format_currency(agent.total_cost),
                 short_tokens(tokens_of(agent)),
-                mw = money_width,
+                format_currency(agent.total_cost),
                 tw = tokens_width,
+                mw = money_width,
             ));
             for model in &agent.models {
                 let cache_text = cache_segment(model.cache_read, model.cache_write);
                 let cache_pad = cache_field.saturating_sub(cache_text.len());
-                let model_tokens =
-                    short_tokens(model.input + model.output + model.cache_read + model.cache_write);
+                let model_tokens = short_tokens(
+                    model.input + model.output + model.cache_read + model.cache_write,
+                );
                 lines.push(format!(
-                    "      {:<nw$} {:>iw$} {:>ow$} {}{} {:>mw$} {:>tw$}",
+                    "      {:<nw$} {:>iw$} {:>ow$} {}{}   {:>tw$} {:>mw$}",
                     model.name,
                     format!("↑{}", short_tokens(model.input)),
                     format!("↓{}", short_tokens(model.output)),
                     " ".repeat(cache_pad),
                     cache_text,
-                    format_currency(model.cost),
                     model_tokens,
+                    format_currency(model.cost),
                     nw = name_width,
                     iw = in_width,
                     ow = out_width,
-                    mw = money_width,
                     tw = tokens_width,
+                    mw = money_width,
                 ));
             }
         }
     }
 
-    // Grand total on the same rail.
     let grand = format_currency(days.iter().map(|day| day.total_cost).sum());
-    let meta = format!("{} days", days.len());
     let grand_tokens = short_tokens(
         all_models.iter().map(|m| m.input + m.output + m.cache_read + m.cache_write).sum(),
     );
-    let used = 2 + "TOTAL".len() + 3 + meta.len() + money_width + 2 + tokens_width;
+    let meta = format!("{} days", days.len());
+    let used = 2 + "TOTAL".len() + 3 + meta.len() + 3 + tokens_width + 1 + money_width;
     let fill = width.saturating_sub(used).max(3);
     lines.push(String::new());
     lines.push(format!(
-        "  TOTAL{} {} {:>mw$} {:>tw$}",
+        "  TOTAL{} {}   {:>tw$} {:>mw$}",
         format!("  {meta}"),
         "─".repeat(fill),
-        grand,
         grand_tokens,
-        mw = money_width,
+        grand,
         tw = tokens_width,
+        mw = money_width,
     ));
-    lines
+    let grid = SummaryGrid {
+        width,
+        money_width,
+        tokens_width,
+        name_width,
+        in_width,
+        out_width,
+        cache_field,
+    };
+    (lines, grid)
 }
 
 /// Collects the loaded report into summary sections and prints the TTY view.
@@ -851,7 +900,6 @@ pub(super) fn print_summary_view(
             total_cost: row.total_cost,
             agents: agent_breakdowns(row)
                 .iter()
-                .filter(|agent| agent.total_cost != 0.0 || !agent.models_used.is_empty())
                 .map(|agent| SummaryAgent {
                     name: strip_store_prefix(agent.agent).to_string(),
                     total_cost: agent.total_cost,
@@ -870,30 +918,71 @@ pub(super) fn print_summary_view(
         })
         .collect();
 
-    let width = (crate::terminal_width().max(72) as usize).min(104);
+    let width = (crate::terminal_width().max(72) as usize).min(124);
     let dim = |value: String| color(shared, value, Color::Grey);
     let bold = |value: String| color(shared, value, Color::Bold);
+    let green = |value: String| color(shared, value, Color::Green);
+    let blue = |value: String| color(shared, value, Color::Blue);
 
-    for line in summary_body_lines(&days, width) {
-        // Day headers get the full treatment: cyan date, dim rule, bold cost.
-        if line.starts_with(' ')
-            && line.contains('─')
-            && !line.contains('↓')
-            && !line.contains("TOTAL")
-        {
-            let rule_start = line.find('─').expect("rule present");
-            let (label, rest) = line.split_at(rule_start);
-            let (rule, money) = rest.split_at(rest.find(char::is_whitespace).unwrap_or(0));
+    let (lines, grid) = summary_body_lines(&days, width);
+    for line in lines {
+        if line.is_empty() {
+            println!();
+            continue;
+        }
+        debug_assert_eq!(line.chars().count(), grid.width, "summary line off grid");
+
+        // Rail cells: tokens then money at fixed offsets from the end.
+        let money_start = grid.width - grid.money_width;
+        let tokens_start = money_start - 1 - grid.tokens_width;
+        let head_end = tokens_start.saturating_sub(3);
+        let head: String = line.chars().take(head_end).collect();
+        let tokens_cell: String =
+            line.chars().skip(tokens_start).take(grid.tokens_width).collect();
+        let money_cell: String = line.chars().skip(money_start).collect();
+
+        if line.contains('↑') {
+            // Model row: dim the cache cell, price green, keep tokens plain.
+            let cs = 6 + grid.name_width + 1 + grid.in_width + 1 + grid.out_width + 1;
+            let ce = cs + grid.cache_field;
+            let chars: Vec<char> = head.chars().collect();
+            let prefix: String = chars[..cs].iter().collect();
+            let cache: String = chars[cs..ce.min(chars.len())].iter().collect();
+            println!("{prefix}{} {} {}", dim(cache), blue(tokens_cell), green(money_cell));
+        } else if line.trim_start().starts_with("TOTAL") {
+            let rule_start = head.find('─').unwrap_or(head.len());
+            let label_part: String = head.chars().take(rule_start).collect();
+            let rule_part: String = head.chars().skip(rule_start).collect();
             println!(
-                "{} {} {}",
-                color(shared, label, Color::Cyan),
-                dim(rule.to_string()),
-                bold(money.to_string())
+                "{}{} {} {}",
+                bold(label_part),
+                dim(rule_part),
+                blue(tokens_cell),
+                green(money_cell)
             );
-        } else if line.trim_start().starts_with("TOTAL") && line.contains('─') {
-            println!("{}", bold(line));
+        } else if line.contains('·') {
+            let dot_start = head.find('·').expect("leader present");
+            let name: String = head.chars().take(dot_start).collect();
+            let dots: String = head.chars().skip(dot_start).collect();
+            println!(
+                "{}{} {} {}",
+                bold(name),
+                dim(dots),
+                blue(tokens_cell),
+                green(money_cell)
+            );
         } else {
-            println!("{line}");
+            // Day header: bold-cyan date, dim rule, blue day tokens and cost.
+            let rule_start = head.find('─').unwrap_or(head.len());
+            let date: String = head.chars().take(rule_start).collect();
+            let rule: String = head.chars().skip(rule_start).collect();
+            println!(
+                "{} {} {} {}",
+                color(shared, date, Color::CyanBold),
+                dim(rule),
+                blue(tokens_cell),
+                blue(money_cell)
+            );
         }
     }
     Ok(())
@@ -902,30 +991,6 @@ pub(super) fn print_summary_view(
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
-
-/// `2026-08-22` -> `Aug 22`; weekly (`2026-W33`) and monthly (`2026-08`)
-/// keys pass through unchanged.
-/// Cache traffic: reads always, writes only when present.
-fn cache_segment(read: u64, creation: u64) -> String {
-    if creation > 0 {
-        format!("cached +{} / {}", short_tokens(creation), short_tokens(read))
-    } else {
-        format!("cached {}", short_tokens(read))
-    }
-}
-
-fn agent_breakdowns(row: &AllRow) -> &[AllRow] {
-    row.agent_breakdowns.as_deref().unwrap_or(&[])
-}
-
-fn visible_models(
-    agent: &AllRow,
-) -> impl Iterator<Item = &crate::ModelBreakdown> {
-    agent.model_breakdowns.iter().filter(|model| {
-        model.input_tokens + model.output_tokens + model.cache_read_tokens
-            + model.cache_creation_tokens > 0
-    })
-}
 
 fn humanize_period(period: &str) -> String {
     if period.len() == 10 && period.as_bytes()[4] == b'-' {
@@ -1045,7 +1110,7 @@ mod summary_tests {
 
     #[test]
     fn money_sits_flush_on_the_rail() {
-        let lines = summary_body_lines(&sample_days(), 104);
+        let (lines, _grid) = summary_body_lines(&sample_days(), 104);
         let money_lines: Vec<&String> =
             lines.iter().filter(|line| line.contains('$')).collect();
         assert!(money_lines.len() >= 9);
@@ -1063,7 +1128,7 @@ mod summary_tests {
 
     #[test]
     fn token_columns_align_across_all_model_rows() {
-        let lines = summary_body_lines(&sample_days(), 104);
+        let (lines, _grid) = summary_body_lines(&sample_days(), 104);
         let model_rows: Vec<&String> = lines
             .iter()
             .filter(|line| line.contains('↑') && line.contains('↓'))
@@ -1072,6 +1137,14 @@ mod summary_tests {
         let out_cols: Vec<usize> =
             model_rows.iter().map(|line| col_of(line, '↓')).collect();
         assert!(out_cols.iter().all(|col| *col == out_cols[0]), "↓ cols: {out_cols:?}");
+        // Cache values must keep their magnitude suffix (guards an old
+        // off-by-one that chopped the trailing character).
+        for line in &model_rows {
+            let cached_start = line.find("cached").expect("cached present");
+            let cell = line[cached_start..].trim_end();
+            let last = cell.chars().last().expect("non-empty cache cell");
+            assert!(last.is_ascii_alphanumeric(), "cache cell truncated: {line:?}");
+        }
         // The strongest layout invariant: every rendered body line occupies
         // exactly `width` display columns, so any column anyone cares about
         // repeats identically down the screen.
