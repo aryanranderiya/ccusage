@@ -806,6 +806,9 @@ fn summary_body_lines(days: &[SummaryDay], width: usize) -> (Vec<String>, Summar
             tw = tokens_width,
             mw = money_width,
         ));
+        // Empty line below the date separates the section header from its
+        // first agent row.
+        lines.push(String::new());
 
         for (agent_index, agent) in day.agents.iter().enumerate() {
             if agent_index > 0 {
@@ -932,38 +935,45 @@ pub(super) fn print_summary_view(
         }
         debug_assert_eq!(line.chars().count(), grid.width, "summary line off grid");
 
-        // Rail cells: tokens then money at fixed offsets from the end.
+        // Rail cells sit at fixed offsets from the end. Coloring wraps the
+        // existing slices verbatim; no separator is ever injected, so the
+        // layout grid survives styling byte-for-byte.
+        let chars: Vec<char> = line.chars().collect();
         let money_start = grid.width - grid.money_width;
         let tokens_start = money_start - 1 - grid.tokens_width;
-        let head_end = tokens_start.saturating_sub(3);
-        let head: String = line.chars().take(head_end).collect();
-        let tokens_cell: String =
-            line.chars().skip(tokens_start).take(grid.tokens_width).collect();
-        let money_cell: String = line.chars().skip(money_start).collect();
+        let head: String = chars[..tokens_start].iter().collect();
+        let tokens_cell: String = chars[tokens_start..money_start].iter().collect();
+        let money_cell: String = chars[money_start..].iter().collect();
 
         if line.contains('↑') {
-            // Model row: dim the cache cell, price green, keep tokens plain.
+            // Model row: dim cache cell, price green, tokens stay plain.
             let cs = 6 + grid.name_width + 1 + grid.in_width + 1 + grid.out_width + 1;
-            let ce = cs + grid.cache_field;
-            let chars: Vec<char> = head.chars().collect();
+            let ce = (cs + grid.cache_field).min(tokens_start);
             let prefix: String = chars[..cs].iter().collect();
-            let cache: String = chars[cs..ce.min(chars.len())].iter().collect();
-            println!("{prefix}{} {} {}", dim(cache), blue(tokens_cell), green(money_cell));
+            let cache: String = chars[cs..ce].iter().collect();
+            let gap: String = chars[ce..tokens_start].iter().collect();
+            println!("{prefix}{}{gap}{} {}", dim(cache), tokens_cell, green(money_cell));
         } else if line.trim_start().starts_with("TOTAL") {
-            let rule_start = head.find('─').unwrap_or(head.len());
-            let label_part: String = head.chars().take(rule_start).collect();
-            let rule_part: String = head.chars().skip(rule_start).collect();
+            // TOTAL: label bold, meta/rule dim, tokens blue, price green.
+            let total_idx = head.find("TOTAL").expect("TOTAL present");
+            let before: String = head.chars().take(total_idx).collect();
+            let label: String =
+                head.chars().skip(total_idx).take(5).collect();
+            let after: String = head.chars().skip(total_idx + 5).collect();
             println!(
-                "{}{} {} {}",
-                bold(label_part),
-                dim(rule_part),
+                "{}{}{} {} {}",
+                dim(before),
+                bold(label),
+                dim(after),
                 blue(tokens_cell),
                 green(money_cell)
             );
         } else if line.contains('·') {
-            let dot_start = head.find('·').expect("leader present");
-            let name: String = head.chars().take(dot_start).collect();
-            let dots: String = head.chars().skip(dot_start).collect();
+            // Agent subtotal: name bold, dotted leader dim, tokens blue,
+            // price green.
+            let dot_idx = head.find('·').expect("leader present");
+            let name: String = head.chars().take(dot_idx).collect();
+            let dots: String = head.chars().skip(dot_idx).collect();
             println!(
                 "{}{} {} {}",
                 bold(name),
@@ -972,10 +982,10 @@ pub(super) fn print_summary_view(
                 green(money_cell)
             );
         } else {
-            // Day header: bold-cyan date, dim rule, blue day tokens and cost.
-            let rule_start = head.find('─').unwrap_or(head.len());
-            let date: String = head.chars().take(rule_start).collect();
-            let rule: String = head.chars().skip(rule_start).collect();
+            // Day header: bold-cyan date, dim rule, tokens and price blue.
+            let rule_idx = head.find('─').unwrap_or(head.len());
+            let date: String = head.chars().take(rule_idx).collect();
+            let rule: String = head.chars().skip(rule_idx).collect();
             println!(
                 "{} {} {} {}",
                 color(shared, date, Color::CyanBold),
@@ -1106,6 +1116,24 @@ mod summary_tests {
     /// terminal counts columns (multi-byte glyphs occupy one cell).
     fn col_of(line: &str, needle: char) -> usize {
         line.chars().position(|ch| ch == needle).expect("needle present")
+    }
+
+    #[test]
+    fn probe_widths() {
+        let days = sample_days();
+        for width in [72usize, 80, 90, 100, 110, 124] {
+            let (lines, grid) = summary_body_lines(&days, width);
+            let mut kinds = Vec::new();
+            for line in &lines {
+                if line.is_empty() { continue; }
+                let kind = if line.contains('↑') { "model" }
+                    else if line.contains('·') { "agent" }
+                    else if line.trim_start().starts_with("TOTAL") { "total" }
+                    else { "header" };
+                kinds.push((kind, line.chars().count()));
+            }
+            println!("width={width} grid_cf={} {:?}", grid.cache_field, kinds);
+        }
     }
 
     #[test]
