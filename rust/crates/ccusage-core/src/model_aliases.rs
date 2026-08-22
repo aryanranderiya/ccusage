@@ -10,15 +10,35 @@ const MODEL_ALIASES_ENV: &str = "CCUSAGE_MODEL_ALIASES";
 static MODEL_ALIASES: OnceLock<RwLock<BTreeMap<String, String>>> = OnceLock::new();
 static TEST_MODEL_ALIASES_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Resolves a model name through `CCUSAGE_MODEL_ALIASES`, including `-fast` variants.
+/// Built-in display aliases, applied after `CCUSAGE_MODEL_ALIASES` (the env
+/// always wins). These rename internal proxy ids to the names people
+/// actually use day to day.
+const BUILTIN_MODEL_ALIASES: &[(&str, &str)] =
+    &[("ox-alpha-free", "stealth ox alpha free")];
+
+fn lookup_alias(
+    aliases: &BTreeMap<String, String>,
+    model: &str,
+) -> Option<String> {
+    if let Some(alias) = aliases.get(model).filter(|alias| !alias.is_empty()) {
+        return Some(alias.clone());
+    }
+    BUILTIN_MODEL_ALIASES
+        .iter()
+        .find(|(from, _)| *from == model)
+        .map(|(_, to)| (*to).to_string())
+}
+
+/// Resolves a model name through `CCUSAGE_MODEL_ALIASES`, built-in aliases,
+/// including `-fast` variants.
 pub fn resolve_model_name(model: &str) -> Cow<'_, str> {
     let aliases = model_aliases();
     let aliases = aliases.read().unwrap_or_else(|error| error.into_inner());
-    if let Some(alias) = aliases.get(model).filter(|alias| !alias.is_empty()) {
-        return Cow::Owned(alias.clone());
+    if let Some(alias) = lookup_alias(&aliases, model) {
+        return Cow::Owned(alias);
     }
     if let Some(base_model) = model.strip_suffix("-fast")
-        && let Some(alias) = aliases.get(base_model).filter(|alias| !alias.is_empty())
+        && let Some(alias) = lookup_alias(&aliases, base_model)
     {
         return Cow::Owned(format!("{alias}-fast"));
     }
@@ -146,5 +166,9 @@ mod tests {
         assert_eq!(resolve_model_name("private-alpha"), "gpt-5.5");
         assert_eq!(resolve_model_name("private-alpha-fast"), "gpt-5.5-fast");
         assert_eq!(resolve_model_name("gpt-5"), "gpt-5");
+        assert_eq!(
+            resolve_model_name("ox-alpha-free"),
+            "stealth ox alpha free"
+        );
     }
 }
