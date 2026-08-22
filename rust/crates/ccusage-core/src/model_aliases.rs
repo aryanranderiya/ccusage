@@ -20,13 +20,25 @@ fn lookup_alias(
     aliases: &BTreeMap<String, String>,
     model: &str,
 ) -> Option<String> {
-    if let Some(alias) = aliases.get(model).filter(|alias| !alias.is_empty()) {
-        return Some(alias.clone());
+    let direct = || -> Option<String> {
+        aliases.get(model).filter(|alias| !alias.is_empty()).cloned().or_else(|| {
+            BUILTIN_MODEL_ALIASES
+                .iter()
+                .find(|(from, _)| *from == model)
+                .map(|(_, to)| (*to).to_string())
+        })
+    };
+    // Store-prefixed ids ("[pi] ox-alpha-free") resolve against their bare
+    // model id so display aliases apply across every source.
+    if let Some(alias) = direct() {
+        return Some(alias);
     }
-    BUILTIN_MODEL_ALIASES
-        .iter()
-        .find(|(from, _)| *from == model)
-        .map(|(_, to)| (*to).to_string())
+    if let Some(rest) = model.strip_prefix('[')
+        && let Some((_, bare)) = rest.split_once("] ")
+    {
+        return lookup_alias(aliases, bare);
+    }
+    None
 }
 
 /// Resolves a model name through `CCUSAGE_MODEL_ALIASES`, built-in aliases,
@@ -168,6 +180,10 @@ mod tests {
         assert_eq!(resolve_model_name("gpt-5"), "gpt-5");
         assert_eq!(
             resolve_model_name("ox-alpha-free"),
+            "stealth ox alpha free"
+        );
+        assert_eq!(
+            resolve_model_name("[pi] ox-alpha-free"),
             "stealth ox alpha free"
         );
     }
